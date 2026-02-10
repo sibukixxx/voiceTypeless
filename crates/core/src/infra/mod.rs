@@ -1,1 +1,2 @@
-// Infrastructure layer: audio, stt, storage, output adapters
+pub mod storage;
+pub mod stt;
