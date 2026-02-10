@@ -7,3 +7,16 @@ edition.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+cpal.workspace = true
+ringbuf.workspace = true
+hound.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "macros"] }
