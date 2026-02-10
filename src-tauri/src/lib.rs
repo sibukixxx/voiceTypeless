@@ -33,6 +33,8 @@ pub fn run() {
             commands::get_session,
             commands::upsert_dictionary,
             commands::list_dictionary,
+            commands::rewrite_last,
+            commands::deliver_last,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

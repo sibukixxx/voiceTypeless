@@ -8,7 +8,7 @@ use vt_core::usecase::app_service::AppService;
 
 use crate::events::{
     self, ErrorPayload, SessionStateChangedPayload,
-    SESSION_STATE_CHANGED, ERROR,
+    SESSION_STATE_CHANGED, DELIVER_DONE, REWRITE_DONE, ERROR,
 };
 
 /// コマンドエラー型（Tauri の Result で使用）
@@ -143,7 +143,6 @@ pub fn get_history(
     service: State<'_, AppService>,
     args: GetHistoryArgs,
 ) -> CmdResult<HistoryPage> {
-    // query はPhase2で全文検索実装予定。今は無視。
     let _ = args.query;
     let page = service.get_history(args.limit, args.cursor.as_deref())?;
     Ok(page)
@@ -174,4 +173,65 @@ pub fn list_dictionary(
 ) -> CmdResult<Vec<DictionaryEntry>> {
     let entries = service.list_dictionary(scope.as_deref())?;
     Ok(entries)
+}
+
+#[tauri::command]
+pub fn rewrite_last(
+    app: AppHandle,
+    service: State<'_, AppService>,
+    mode: Mode,
+) -> CmdResult<()> {
+    let (segment_id, raw_text, _current_mode) = service.get_last_segment_for_rewrite()?;
+
+    // NoopRewriter相当: Phase3でLLM連携に差し替え
+    let rewritten = format!("[rewritten:{}] {}", serde_json::to_value(mode).unwrap_or_default(), raw_text);
+
+    service.on_rewrite_done(&segment_id, &rewritten)?;
+
+    let session_id = service.current_session_id().unwrap_or_default();
+    events::emit_event(
+        &app,
+        REWRITE_DONE,
+        events::RewriteDonePayload {
+            session_id,
+            segment_id,
+            text: rewritten,
+            mode: serde_json::to_value(mode)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default(),
+        },
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn deliver_last(
+    app: AppHandle,
+    service: State<'_, AppService>,
+) -> CmdResult<()> {
+    let (transition, _text) = service.deliver_last()?;
+
+    events::emit_event(
+        &app,
+        DELIVER_DONE,
+        events::DeliverDonePayload {
+            session_id: transition.session_id.clone(),
+            target: "clipboard".to_string(),
+        },
+    );
+
+    events::emit_event(
+        &app,
+        SESSION_STATE_CHANGED,
+        SessionStateChangedPayload {
+            session_id: transition.session_id,
+            prev_state: transition.prev_state,
+            new_state: transition.new_state.as_str().to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+
+    Ok(())
 }

@@ -1,7 +1,9 @@
 use rusqlite::{Connection, params};
 
 use crate::domain::error::AppError;
-use crate::domain::types::{HistoryPage, Mode, Segment, SessionDetail, SessionSummary};
+use crate::domain::types::{
+    DictionaryEntry, DictionaryScope, HistoryPage, Mode, Segment, SessionDetail, SessionSummary,
+};
 
 /// SQLiteストレージ（sessions + segments）
 pub struct Storage {
@@ -55,6 +57,19 @@ impl Storage {
                     ON segments(session_id);
                 CREATE INDEX IF NOT EXISTS idx_sessions_created
                     ON sessions(created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS dictionary_entries (
+                    id          TEXT PRIMARY KEY,
+                    scope       TEXT NOT NULL DEFAULT 'global',
+                    mode        TEXT,
+                    pattern     TEXT NOT NULL,
+                    replacement TEXT NOT NULL,
+                    priority    INTEGER NOT NULL DEFAULT 0,
+                    enabled     INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_dict_scope
+                    ON dictionary_entries(scope, enabled);
                 ",
             )
             .map_err(|e| AppError::storage(format!("マイグレーション失敗: {e}")))?;
@@ -139,6 +154,148 @@ impl Storage {
             )
             .map_err(|e| AppError::storage(format!("セグメントリライト更新失敗: {e}")))?;
         Ok(())
+    }
+
+    // --- Dictionary ---
+
+    pub fn upsert_dictionary_entry(&self, entry: &DictionaryEntry) -> Result<String, AppError> {
+        let id = entry
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let scope_str = match entry.scope {
+            DictionaryScope::Global => "global",
+            DictionaryScope::Mode => "mode",
+        };
+        let mode_str = entry.mode.map(|m| {
+            serde_json::to_value(m)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default()
+        });
+
+        self.conn
+            .execute(
+                "INSERT INTO dictionary_entries (id, scope, mode, pattern, replacement, priority, enabled)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(id) DO UPDATE SET
+                    scope = excluded.scope,
+                    mode = excluded.mode,
+                    pattern = excluded.pattern,
+                    replacement = excluded.replacement,
+                    priority = excluded.priority,
+                    enabled = excluded.enabled",
+                params![
+                    id,
+                    scope_str,
+                    mode_str,
+                    entry.pattern,
+                    entry.replacement,
+                    entry.priority,
+                    entry.enabled as i32,
+                ],
+            )
+            .map_err(|e| AppError::storage(format!("辞書エントリ保存失敗: {e}")))?;
+
+        Ok(id)
+    }
+
+    pub fn list_dictionary_entries(
+        &self,
+        scope: Option<&str>,
+    ) -> Result<Vec<DictionaryEntry>, AppError> {
+        let mut stmt;
+        let entries: Vec<DictionaryEntry>;
+
+        if let Some(scope_filter) = scope {
+            stmt = self
+                .conn
+                .prepare(
+                    "SELECT id, scope, mode, pattern, replacement, priority, enabled
+                     FROM dictionary_entries
+                     WHERE scope = ?1
+                     ORDER BY priority DESC",
+                )
+                .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+            entries = stmt
+                .query_map(params![scope_filter], |row| Self::map_dict_row(row))
+                .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+        } else {
+            stmt = self
+                .conn
+                .prepare(
+                    "SELECT id, scope, mode, pattern, replacement, priority, enabled
+                     FROM dictionary_entries
+                     ORDER BY priority DESC",
+                )
+                .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+            entries = stmt
+                .query_map([], |row| Self::map_dict_row(row))
+                .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+        }
+
+        Ok(entries)
+    }
+
+    pub fn get_enabled_dictionary_entries(
+        &self,
+        scope: &str,
+        mode: Option<&str>,
+    ) -> Result<Vec<DictionaryEntry>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, scope, mode, pattern, replacement, priority, enabled
+                 FROM dictionary_entries
+                 WHERE enabled = 1
+                   AND (scope = 'global' OR (scope = ?1 AND (mode IS NULL OR mode = ?2)))
+                 ORDER BY priority DESC",
+            )
+            .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+
+        let entries = stmt
+            .query_map(params![scope, mode.unwrap_or("")], |row| {
+                Self::map_dict_row(row)
+            })
+            .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+
+        Ok(entries)
+    }
+
+    pub fn delete_dictionary_entry(&self, id: &str) -> Result<bool, AppError> {
+        let affected = self
+            .conn
+            .execute(
+                "DELETE FROM dictionary_entries WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|e| AppError::storage(format!("辞書エントリ削除失敗: {e}")))?;
+        Ok(affected > 0)
+    }
+
+    fn map_dict_row(row: &rusqlite::Row) -> rusqlite::Result<DictionaryEntry> {
+        let scope_str: String = row.get(1)?;
+        let mode_str: Option<String> = row.get(2)?;
+        let enabled_int: i32 = row.get(6)?;
+
+        Ok(DictionaryEntry {
+            id: Some(row.get(0)?),
+            scope: match scope_str.as_str() {
+                "mode" => DictionaryScope::Mode,
+                _ => DictionaryScope::Global,
+            },
+            mode: mode_str.as_deref().map(parse_mode),
+            pattern: row.get(3)?,
+            replacement: row.get(4)?,
+            priority: row.get(5)?,
+            enabled: enabled_int != 0,
+        })
     }
 
     // --- Queries ---
@@ -398,5 +555,175 @@ mod tests {
         let storage = Storage::open_in_memory().unwrap();
         let result = storage.get_session_detail("nonexistent").unwrap();
         assert!(result.is_none());
+    }
+
+    // --- Dictionary tests ---
+
+    #[test]
+    fn test_upsert_and_list_dictionary() {
+        let storage = Storage::open_in_memory().unwrap();
+        let entry = DictionaryEntry {
+            id: None,
+            scope: DictionaryScope::Global,
+            mode: None,
+            pattern: "くろーど".into(),
+            replacement: "Claude".into(),
+            priority: 10,
+            enabled: true,
+        };
+        let id = storage.upsert_dictionary_entry(&entry).unwrap();
+        assert!(!id.is_empty());
+
+        let entries = storage.list_dictionary_entries(None).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].pattern, "くろーど");
+        assert_eq!(entries[0].replacement, "Claude");
+        assert_eq!(entries[0].priority, 10);
+        assert!(entries[0].enabled);
+    }
+
+    #[test]
+    fn test_upsert_update_existing() {
+        let storage = Storage::open_in_memory().unwrap();
+        let entry = DictionaryEntry {
+            id: Some("dict1".into()),
+            scope: DictionaryScope::Global,
+            mode: None,
+            pattern: "foo".into(),
+            replacement: "bar".into(),
+            priority: 5,
+            enabled: true,
+        };
+        storage.upsert_dictionary_entry(&entry).unwrap();
+
+        // 同じIDで更新
+        let updated = DictionaryEntry {
+            id: Some("dict1".into()),
+            scope: DictionaryScope::Global,
+            mode: None,
+            pattern: "foo".into(),
+            replacement: "baz".into(),
+            priority: 10,
+            enabled: true,
+        };
+        storage.upsert_dictionary_entry(&updated).unwrap();
+
+        let entries = storage.list_dictionary_entries(None).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].replacement, "baz");
+        assert_eq!(entries[0].priority, 10);
+    }
+
+    #[test]
+    fn test_list_dictionary_by_scope() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .upsert_dictionary_entry(&DictionaryEntry {
+                id: Some("g1".into()),
+                scope: DictionaryScope::Global,
+                mode: None,
+                pattern: "a".into(),
+                replacement: "b".into(),
+                priority: 1,
+                enabled: true,
+            })
+            .unwrap();
+        storage
+            .upsert_dictionary_entry(&DictionaryEntry {
+                id: Some("m1".into()),
+                scope: DictionaryScope::Mode,
+                mode: Some(Mode::Tech),
+                pattern: "c".into(),
+                replacement: "d".into(),
+                priority: 1,
+                enabled: true,
+            })
+            .unwrap();
+
+        let global = storage.list_dictionary_entries(Some("global")).unwrap();
+        assert_eq!(global.len(), 1);
+        assert_eq!(global[0].id.as_deref(), Some("g1"));
+
+        let mode = storage.list_dictionary_entries(Some("mode")).unwrap();
+        assert_eq!(mode.len(), 1);
+        assert_eq!(mode[0].id.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn test_get_enabled_dictionary_entries() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .upsert_dictionary_entry(&DictionaryEntry {
+                id: Some("e1".into()),
+                scope: DictionaryScope::Global,
+                mode: None,
+                pattern: "a".into(),
+                replacement: "b".into(),
+                priority: 10,
+                enabled: true,
+            })
+            .unwrap();
+        storage
+            .upsert_dictionary_entry(&DictionaryEntry {
+                id: Some("e2".into()),
+                scope: DictionaryScope::Global,
+                mode: None,
+                pattern: "c".into(),
+                replacement: "d".into(),
+                priority: 5,
+                enabled: false, // disabled
+            })
+            .unwrap();
+
+        let entries = storage
+            .get_enabled_dictionary_entries("global", None)
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id.as_deref(), Some("e1"));
+    }
+
+    #[test]
+    fn test_delete_dictionary_entry() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .upsert_dictionary_entry(&DictionaryEntry {
+                id: Some("del1".into()),
+                scope: DictionaryScope::Global,
+                mode: None,
+                pattern: "x".into(),
+                replacement: "y".into(),
+                priority: 1,
+                enabled: true,
+            })
+            .unwrap();
+
+        assert!(storage.delete_dictionary_entry("del1").unwrap());
+        assert!(!storage.delete_dictionary_entry("del1").unwrap()); // already deleted
+
+        let entries = storage.list_dictionary_entries(None).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_dictionary_priority_ordering() {
+        let storage = Storage::open_in_memory().unwrap();
+        for (id, pri) in [("low", 1), ("high", 100), ("mid", 50)] {
+            storage
+                .upsert_dictionary_entry(&DictionaryEntry {
+                    id: Some(id.into()),
+                    scope: DictionaryScope::Global,
+                    mode: None,
+                    pattern: id.into(),
+                    replacement: id.into(),
+                    priority: pri,
+                    enabled: true,
+                })
+                .unwrap();
+        }
+
+        let entries = storage.list_dictionary_entries(None).unwrap();
+        assert_eq!(entries[0].id.as_deref(), Some("high"));
+        assert_eq!(entries[1].id.as_deref(), Some("mid"));
+        assert_eq!(entries[2].id.as_deref(), Some("low"));
     }
 }

@@ -12,6 +12,7 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
+arboard = "3"
 log = "0.4"
 
 [dev-dependencies]

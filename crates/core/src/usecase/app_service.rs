@@ -5,12 +5,15 @@ use crate::domain::session::{SessionManager, SessionState, StateTransition};
 use crate::domain::types::{
     DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
 };
+use crate::infra::output::OutputRouter;
+use crate::infra::post_processor::PostProcessor;
 use crate::infra::storage::Storage;
 
 /// アプリケーションサービス（Tauri State として管理される）
 pub struct AppService {
     session_mgr: Mutex<SessionManager>,
     storage: Mutex<Storage>,
+    output_router: OutputRouter,
 }
 
 impl AppService {
@@ -18,6 +21,7 @@ impl AppService {
         Self {
             session_mgr: Mutex::new(SessionManager::new()),
             storage: Mutex::new(storage),
+            output_router: OutputRouter::new(),
         }
     }
 
@@ -93,17 +97,35 @@ impl AppService {
         mgr.set_mode(mode)
     }
 
-    /// STT完了通知（内部から呼ばれる）
+    /// STT完了通知 + 後処理パイプライン適用
     pub fn on_transcript_done(
         &self,
         segment_id: &str,
         text: &str,
         confidence: f32,
-    ) -> Result<StateTransition, AppError> {
+    ) -> Result<(StateTransition, String), AppError> {
         let now = chrono::Utc::now().to_rfc3339();
 
+        // 辞書エントリ取得
         let storage = self.storage.lock().unwrap();
-        storage.update_segment_text(segment_id, text, confidence)?;
+        let mode_str = {
+            let mgr = self.session_mgr.lock().unwrap();
+            mgr.active()
+                .map(|s| {
+                    serde_json::to_value(s.mode)
+                        .ok()
+                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                })
+                .flatten()
+        };
+        let dict_entries = storage
+            .get_enabled_dictionary_entries("global", mode_str.as_deref())
+            .unwrap_or_default();
+
+        // 後処理パイプライン適用
+        let processed_text = PostProcessor::process(text, &dict_entries);
+
+        storage.update_segment_text(segment_id, &processed_text, confidence)?;
 
         let mut mgr = self.session_mgr.lock().unwrap();
         let transition = mgr.on_transcript_done(now.clone())?;
@@ -113,10 +135,10 @@ impl AppService {
             &now,
         )?;
 
-        Ok(transition)
+        Ok((transition, processed_text))
     }
 
-    /// リライト完了通知（内部から呼ばれる）
+    /// リライト完了通知
     pub fn on_rewrite_done(
         &self,
         segment_id: &str,
@@ -138,8 +160,11 @@ impl AppService {
         Ok(transition)
     }
 
-    /// 配信完了通知（内部から呼ばれる）
-    pub fn on_deliver_done(&self) -> Result<StateTransition, AppError> {
+    /// 配信実行 + 状態遷移
+    pub fn deliver(&self, text: &str) -> Result<StateTransition, AppError> {
+        // クリップボードに出力
+        self.output_router.deliver_clipboard(text)?;
+
         let now = chrono::Utc::now().to_rfc3339();
         let mut mgr = self.session_mgr.lock().unwrap();
         let transition = mgr.on_deliver_done(now.clone())?;
@@ -152,6 +177,93 @@ impl AppService {
         )?;
 
         Ok(transition)
+    }
+
+    /// deliver_last: 最後のセグメントのテキストをクリップボードに出力
+    pub fn deliver_last(&self) -> Result<(StateTransition, String), AppError> {
+        let session_id = {
+            let mgr = self.session_mgr.lock().unwrap();
+            mgr.active()
+                .map(|s| s.session_id.clone())
+                .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?
+        };
+
+        let storage = self.storage.lock().unwrap();
+        let detail = storage
+            .get_session_detail(&session_id)?
+            .ok_or_else(|| AppError::internal("セッション詳細が見つかりません"))?;
+        drop(storage);
+
+        let last_segment = detail
+            .segments
+            .last()
+            .ok_or_else(|| AppError::internal("セグメントがありません"))?;
+
+        let text = last_segment
+            .rewritten_text
+            .as_deref()
+            .unwrap_or(&last_segment.raw_text);
+
+        self.output_router.deliver_clipboard(text)?;
+
+        // Delivering状態でなければ状態遷移はスキップ（手動deliver）
+        let mgr = self.session_mgr.lock().unwrap();
+        let current_state = mgr.active().map(|s| s.state.as_str().to_string());
+        drop(mgr);
+
+        let text_result = text.to_string();
+
+        if current_state.as_deref() == Some("delivering") {
+            let now = chrono::Utc::now().to_rfc3339();
+            let mut mgr = self.session_mgr.lock().unwrap();
+            let transition = mgr.on_deliver_done(now.clone())?;
+            let storage = self.storage.lock().unwrap();
+            storage.update_session_state(
+                &transition.session_id,
+                transition.new_state.as_str(),
+                &now,
+            )?;
+            Ok((transition, text_result))
+        } else {
+            Ok((
+                StateTransition {
+                    session_id,
+                    prev_state: current_state.unwrap_or_default(),
+                    new_state: SessionState::Idle,
+                },
+                text_result,
+            ))
+        }
+    }
+
+    /// rewrite_last: 最後のセグメントのテキストでリライトをトリガー
+    /// 返り値: (segment_id, raw_text, mode)
+    pub fn get_last_segment_for_rewrite(
+        &self,
+    ) -> Result<(String, String, Mode), AppError> {
+        let (session_id, mode) = {
+            let mgr = self.session_mgr.lock().unwrap();
+            let s = mgr
+                .active()
+                .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?;
+            (s.session_id.clone(), s.mode)
+        };
+
+        let storage = self.storage.lock().unwrap();
+        let detail = storage
+            .get_session_detail(&session_id)?
+            .ok_or_else(|| AppError::internal("セッション詳細が見つかりません"))?;
+
+        let last_segment = detail
+            .segments
+            .last()
+            .ok_or_else(|| AppError::internal("セグメントがありません"))?;
+
+        Ok((
+            last_segment.segment_id.clone(),
+            last_segment.raw_text.clone(),
+            mode,
+        ))
     }
 
     /// 履歴取得
@@ -170,16 +282,16 @@ impl AppService {
         storage.get_session_detail(session_id)
     }
 
-    /// 辞書アップサート（スタブ）
-    pub fn upsert_dictionary(&self, _entry: DictionaryEntry) -> Result<String, AppError> {
-        // Phase2で実装。今はIDを返すだけ。
-        Ok(uuid::Uuid::new_v4().to_string())
+    /// 辞書アップサート
+    pub fn upsert_dictionary(&self, entry: DictionaryEntry) -> Result<String, AppError> {
+        let storage = self.storage.lock().unwrap();
+        storage.upsert_dictionary_entry(&entry)
     }
 
-    /// 辞書一覧（スタブ）
-    pub fn list_dictionary(&self, _scope: Option<&str>) -> Result<Vec<DictionaryEntry>, AppError> {
-        // Phase2で実装。
-        Ok(vec![])
+    /// 辞書一覧
+    pub fn list_dictionary(&self, scope: Option<&str>) -> Result<Vec<DictionaryEntry>, AppError> {
+        let storage = self.storage.lock().unwrap();
+        storage.list_dictionary_entries(scope)
     }
 
     /// 現在のセッション状態を取得

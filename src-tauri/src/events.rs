@@ -38,3 +38,19 @@ pub struct ErrorPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 }
+
+/// rewrite_done ペイロード
+#[derive(Debug, Clone, Serialize)]
+pub struct RewriteDonePayload {
+    pub session_id: String,
+    pub segment_id: String,
+    pub text: String,
+    pub mode: String,
+}
+
+/// deliver_done ペイロード
+#[derive(Debug, Clone, Serialize)]
+pub struct DeliverDonePayload {
+    pub session_id: String,
+    pub target: String,
+}
