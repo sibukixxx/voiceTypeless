@@ -1,9 +1,12 @@
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
+use vt_core::domain::settings::AppSettings;
 use vt_core::domain::types::{
     DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
 };
+use vt_core::infra::metrics::MetricsSummary;
+use vt_core::infra::os_integration::{PasteResult, PermissionStatus};
 use vt_core::usecase::app_service::AppService;
 
 use crate::events::{
@@ -234,4 +237,55 @@ pub fn deliver_last(
     );
 
     Ok(())
+}
+
+// --- Phase 3 Commands ---
+
+#[tauri::command]
+pub fn get_settings(
+    service: State<'_, AppService>,
+) -> CmdResult<AppSettings> {
+    let settings = service.get_settings()?;
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn update_settings(
+    service: State<'_, AppService>,
+    settings: AppSettings,
+) -> CmdResult<()> {
+    service.update_settings(settings)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn check_permissions(
+    service: State<'_, AppService>,
+) -> CmdResult<PermissionStatus> {
+    Ok(service.check_permissions())
+}
+
+#[tauri::command]
+pub fn get_metrics(
+    service: State<'_, AppService>,
+) -> CmdResult<MetricsSummary> {
+    Ok(service.get_metrics())
+}
+
+#[tauri::command]
+pub fn cleanup_data(
+    service: State<'_, AppService>,
+    ttl_days: u32,
+) -> CmdResult<(u32, u32)> {
+    let result = service.cleanup_old_data(ttl_days)?;
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn paste_to_active_app(
+    service: State<'_, AppService>,
+    text: String,
+) -> CmdResult<PasteResult> {
+    let result = service.paste_to_active_app(&text)?;
+    Ok(result)
 }

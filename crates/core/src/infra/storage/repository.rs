@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 
 use crate::domain::error::AppError;
+use crate::domain::settings::AppSettings;
 use crate::domain::types::{
     DictionaryEntry, DictionaryScope, HistoryPage, Mode, Segment, SessionDetail, SessionSummary,
 };
@@ -70,6 +71,11 @@ impl Storage {
 
                 CREATE INDEX IF NOT EXISTS idx_dict_scope
                     ON dictionary_entries(scope, enabled);
+
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 ",
             )
             .map_err(|e| AppError::storage(format!("マイグレーション失敗: {e}")))?;
@@ -426,6 +432,92 @@ impl Storage {
             segments,
         }))
     }
+
+    // --- Settings ---
+
+    pub fn get_settings(&self) -> Result<AppSettings, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM settings")
+            .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+
+        if rows.is_empty() {
+            return Ok(AppSettings::default());
+        }
+
+        // key-value をJSONに組み立ててデシリアライズ
+        let mut map = serde_json::Map::new();
+        for (key, value) in &rows {
+            // JSONとして解析可能ならそのまま、そうでなければ文字列として
+            if let Ok(v) = serde_json::from_str(value) {
+                map.insert(key.clone(), v);
+            } else {
+                map.insert(key.clone(), serde_json::Value::String(value.clone()));
+            }
+        }
+
+        let json = serde_json::Value::Object(map);
+        let mut settings = AppSettings::default();
+
+        // 各フィールドを上書き（存在するキーだけ）
+        if let Ok(merged) = serde_json::from_value::<AppSettings>(json) {
+            settings = merged;
+        }
+
+        Ok(settings)
+    }
+
+    pub fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
+        let json = serde_json::to_value(settings)
+            .map_err(|e| AppError::internal(format!("settings serialize: {e}")))?;
+
+        if let Some(obj) = json.as_object() {
+            for (key, value) in obj {
+                let value_str = value.to_string();
+                self.conn
+                    .execute(
+                        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        params![key, value_str],
+                    )
+                    .map_err(|e| AppError::storage(format!("設定保存失敗: {e}")))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    // --- Data cleanup ---
+
+    pub fn delete_old_segments(&self, before_date: &str) -> Result<u32, AppError> {
+        let affected = self
+            .conn
+            .execute(
+                "DELETE FROM segments WHERE created_at < ?1",
+                params![before_date],
+            )
+            .map_err(|e| AppError::storage(format!("セグメント削除失敗: {e}")))?;
+        Ok(affected as u32)
+    }
+
+    pub fn delete_old_sessions(&self, before_date: &str) -> Result<u32, AppError> {
+        // セグメントが全て削除されたセッションを削除
+        let affected = self
+            .conn
+            .execute(
+                "DELETE FROM sessions WHERE created_at < ?1
+                 AND session_id NOT IN (SELECT DISTINCT session_id FROM segments)",
+                params![before_date],
+            )
+            .map_err(|e| AppError::storage(format!("セッション削除失敗: {e}")))?;
+        Ok(affected as u32)
+    }
 }
 
 fn parse_mode(s: &str) -> Mode {
@@ -702,6 +794,83 @@ mod tests {
 
         let entries = storage.list_dictionary_entries(None).unwrap();
         assert!(entries.is_empty());
+    }
+
+    // --- Settings tests ---
+
+    #[test]
+    fn test_settings_default_when_empty() {
+        let storage = Storage::open_in_memory().unwrap();
+        let settings = storage.get_settings().unwrap();
+        assert_eq!(settings.segment_ttl_days, 0);
+        assert!(settings.paste_confirm);
+        assert!(settings.paste_allowlist.is_empty());
+    }
+
+    #[test]
+    fn test_save_and_get_settings() {
+        let storage = Storage::open_in_memory().unwrap();
+        let mut settings = AppSettings::default();
+        settings.segment_ttl_days = 30;
+        settings.rewrite_enabled = true;
+        settings.paste_allowlist = vec!["com.apple.Terminal".to_string()];
+
+        storage.save_settings(&settings).unwrap();
+
+        let loaded = storage.get_settings().unwrap();
+        assert_eq!(loaded.segment_ttl_days, 30);
+        assert!(loaded.rewrite_enabled);
+        assert_eq!(loaded.paste_allowlist, vec!["com.apple.Terminal"]);
+    }
+
+    // --- Data cleanup tests ---
+
+    #[test]
+    fn test_delete_old_segments() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .insert_session("s1", Mode::Raw, "2025-01-01T00:00:00Z")
+            .unwrap();
+        storage
+            .insert_segment("seg_old", "s1", "2025-01-01T00:00:00Z")
+            .unwrap();
+        storage
+            .insert_segment("seg_new", "s1", "2025-06-01T00:00:00Z")
+            .unwrap();
+
+        let deleted = storage
+            .delete_old_segments("2025-03-01T00:00:00Z")
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        let detail = storage.get_session_detail("s1").unwrap().unwrap();
+        assert_eq!(detail.segments.len(), 1);
+        assert_eq!(detail.segments[0].segment_id, "seg_new");
+    }
+
+    #[test]
+    fn test_delete_old_sessions() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .insert_session("s_old", Mode::Raw, "2025-01-01T00:00:00Z")
+            .unwrap();
+        storage
+            .insert_session("s_new", Mode::Raw, "2025-06-01T00:00:00Z")
+            .unwrap();
+        // s_new has a segment, so it shouldn't be deleted even if old
+        storage
+            .insert_segment("seg1", "s_new", "2025-06-01T00:00:00Z")
+            .unwrap();
+
+        let deleted = storage
+            .delete_old_sessions("2025-12-01T00:00:00Z")
+            .unwrap();
+        // s_old has no segments and is old → deleted
+        // s_new has segments → not deleted
+        assert_eq!(deleted, 1);
+
+        assert!(storage.get_session_detail("s_old").unwrap().is_none());
+        assert!(storage.get_session_detail("s_new").unwrap().is_some());
     }
 
     #[test]
