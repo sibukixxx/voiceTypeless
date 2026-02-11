@@ -20,10 +20,15 @@ export function RecorderPage() {
   const busy = isBusy(sessionState);
 
   const handleToggle = async () => {
-    if (!active) {
-      await startSession();
-    } else {
-      await toggleRecording();
+    try {
+      if (!active) {
+        await startSession();
+        await toggleRecording();
+      } else {
+        await toggleRecording();
+      }
+    } catch (e) {
+      console.error("[handleToggle] error:", e);
     }
   };
 

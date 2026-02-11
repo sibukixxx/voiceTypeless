@@ -1,17 +1,23 @@
+use std::sync::mpsc;
+
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
+use vt_core::domain::session::SessionState;
 use vt_core::domain::settings::AppSettings;
 use vt_core::domain::types::{
     DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
 };
+use vt_core::infra::audio::pipeline::PipelineEvent;
 use vt_core::infra::metrics::MetricsSummary;
 use vt_core::infra::os_integration::{PasteResult, PermissionStatus};
 use vt_core::usecase::app_service::AppService;
 
 use crate::events::{
-    self, ErrorPayload, SessionStateChangedPayload,
-    SESSION_STATE_CHANGED, DELIVER_DONE, REWRITE_DONE, ERROR,
+    self, AudioLevelPayload, ErrorPayload, SessionStateChangedPayload,
+    TranscriptFinalPayload, TranscriptPartialPayload,
+    AUDIO_LEVEL, DELIVER_DONE, ERROR, REWRITE_DONE, SESSION_STATE_CHANGED,
+    TRANSCRIPT_FINAL, TRANSCRIPT_PARTIAL,
 };
 
 /// コマンドエラー型（Tauri の Result で使用）
@@ -34,20 +40,15 @@ type CmdResult<T> = Result<T, CommandError>;
 
 // --- Commands ---
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartSessionArgs {
-    mode: Mode,
-    deliver_policy: DeliverPolicy,
-}
-
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn start_session(
     app: AppHandle,
     service: State<'_, AppService>,
-    args: StartSessionArgs,
+    mode: Mode,
+    deliver_policy: DeliverPolicy,
 ) -> CmdResult<String> {
-    let (session_id, transition) = service.start_session(args.mode, args.deliver_policy)?;
+    log::info!("start_session called: mode={:?}", mode);
+    let (session_id, transition) = service.start_session(mode, deliver_policy)?;
 
     events::emit_event(
         &app,
@@ -91,35 +92,124 @@ pub fn toggle_recording(
     app: AppHandle,
     service: State<'_, AppService>,
 ) -> CmdResult<()> {
-    match service.toggle_recording() {
-        Ok(transition) => {
-            events::emit_event(
-                &app,
-                SESSION_STATE_CHANGED,
-                SessionStateChangedPayload {
-                    session_id: transition.session_id,
-                    prev_state: transition.prev_state,
-                    new_state: transition.new_state.as_str().to_string(),
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                },
-            );
-            Ok(())
-        }
-        Err(e) => {
-            let session_id = service.current_session_id();
-            events::emit_event(
-                &app,
-                ERROR,
-                ErrorPayload {
-                    code: "E_INVALID_STATE".to_string(),
-                    message: e.to_string(),
-                    recoverable: true,
-                    session_id,
-                },
-            );
-            Err(e.into())
+    let current_state = service.current_state();
+
+    if current_state.as_deref() == Some("recording") {
+        // 録音中 → 一時停止（パイプライン停止 + Recording→Idle）
+        let transition = service.pause_recording()?;
+        events::emit_event(
+            &app,
+            SESSION_STATE_CHANGED,
+            SessionStateChangedPayload {
+                session_id: transition.session_id,
+                prev_state: transition.prev_state,
+                new_state: transition.new_state.as_str().to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            },
+        );
+    } else {
+        // Idle → Recording（パイプライン開始）
+        let transition = service.toggle_recording()?;
+        events::emit_event(
+            &app,
+            SESSION_STATE_CHANGED,
+            SessionStateChangedPayload {
+                session_id: transition.session_id.clone(),
+                prev_state: transition.prev_state.clone(),
+                new_state: transition.new_state.as_str().to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            },
+        );
+
+        if transition.new_state == SessionState::Recording {
+            match service.start_pipeline() {
+                Ok(event_rx) => {
+                    spawn_event_forwarder(app.clone(), event_rx);
+                }
+                Err(e) => {
+                    log::error!("Failed to start audio pipeline: {}", e);
+                    // パイプライン開始失敗 → Idle に戻す
+                    if let Ok(revert) = service.pause_recording() {
+                        events::emit_event(
+                            &app,
+                            SESSION_STATE_CHANGED,
+                            SessionStateChangedPayload {
+                                session_id: revert.session_id.clone(),
+                                prev_state: revert.prev_state,
+                                new_state: revert.new_state.as_str().to_string(),
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                            },
+                        );
+                    }
+                    events::emit_event(
+                        &app,
+                        ERROR,
+                        ErrorPayload {
+                            code: "E_DEVICE".to_string(),
+                            message: e.to_string(),
+                            recoverable: true,
+                            session_id: service.current_session_id(),
+                        },
+                    );
+                    return Err(e.into());
+                }
+            }
         }
     }
+
+    Ok(())
+}
+
+/// パイプラインイベント → Tauri イベントの転送スレッドを起動
+fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>) {
+    std::thread::spawn(move || {
+        use tauri::Manager;
+        for event in event_rx {
+            match event {
+                PipelineEvent::AudioLevel(rms) => {
+                    events::emit_event(&app, AUDIO_LEVEL, AudioLevelPayload { rms });
+                }
+                PipelineEvent::TranscriptPartial { text } => {
+                    events::emit_event(
+                        &app,
+                        TRANSCRIPT_PARTIAL,
+                        TranscriptPartialPayload { text },
+                    );
+                }
+                PipelineEvent::TranscriptFinal { text, confidence } => {
+                    let service = app.state::<AppService>();
+                    match service.on_pipeline_transcript(&text, confidence) {
+                        Ok(processed_text) => {
+                            events::emit_event(
+                                &app,
+                                TRANSCRIPT_FINAL,
+                                TranscriptFinalPayload {
+                                    text: processed_text,
+                                    confidence,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            log::error!("Pipeline transcript processing error: {}", e);
+                        }
+                    }
+                }
+                PipelineEvent::Error(msg) => {
+                    events::emit_event(
+                        &app,
+                        ERROR,
+                        ErrorPayload {
+                            code: "E_PIPELINE".to_string(),
+                            message: msg,
+                            recoverable: true,
+                            session_id: None,
+                        },
+                    );
+                }
+            }
+        }
+        log::info!("Pipeline event forwarder thread exiting");
+    });
 }
 
 #[tauri::command]

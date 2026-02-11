@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+pub mod apple_speech;
 mod noop;
 
 pub use noop::NoopSttService;

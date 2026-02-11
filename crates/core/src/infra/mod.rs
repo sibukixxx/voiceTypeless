@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod metrics;
 pub mod os_integration;
 pub mod output;

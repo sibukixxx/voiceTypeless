@@ -1,4 +1,5 @@
-use std::sync::Mutex;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 use crate::domain::error::AppError;
 use crate::domain::session::{SessionManager, SessionState, StateTransition};
@@ -6,11 +7,14 @@ use crate::domain::settings::AppSettings;
 use crate::domain::types::{
     DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
 };
+use crate::infra::audio::pipeline::{AudioPipeline, PipelineEvent};
+use crate::infra::audio::vad::VadConfig;
 use crate::infra::metrics::{Metrics, MetricsSummary};
 use crate::infra::os_integration::{OsIntegration, PasteResult, PasteRouter, PermissionStatus};
 use crate::infra::output::OutputRouter;
 use crate::infra::post_processor::PostProcessor;
 use crate::infra::storage::Storage;
+use crate::infra::stt::SttEngine;
 
 /// アプリケーションサービス（Tauri State として管理される）
 pub struct AppService {
@@ -18,15 +22,19 @@ pub struct AppService {
     storage: Mutex<Storage>,
     output_router: OutputRouter,
     metrics: Metrics,
+    stt_engine: Arc<dyn SttEngine>,
+    pipeline: Mutex<Option<AudioPipeline>>,
 }
 
 impl AppService {
-    pub fn new(storage: Storage) -> Self {
+    pub fn new(storage: Storage, stt_engine: Arc<dyn SttEngine>) -> Self {
         Self {
             session_mgr: Mutex::new(SessionManager::new()),
             storage: Mutex::new(storage),
             output_router: OutputRouter::new(),
             metrics: Metrics::new(),
+            stt_engine,
+            pipeline: Mutex::new(None),
         }
     }
 
@@ -58,6 +66,9 @@ impl AppService {
     }
 
     pub fn stop_session(&self) -> Result<Option<StateTransition>, AppError> {
+        // パイプラインが動作中なら停止
+        self.stop_pipeline();
+
         let mut mgr = self.session_mgr.lock().unwrap();
         let session = mgr.stop_session()?;
 
@@ -96,12 +107,94 @@ impl AppService {
         Ok(transition)
     }
 
+    /// パイプラインモード用: Recording → Idle
+    pub fn pause_recording(&self) -> Result<StateTransition, AppError> {
+        // パイプライン停止（最終セグメント処理完了まで待機）
+        self.stop_pipeline();
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut mgr = self.session_mgr.lock().unwrap();
+        let transition = mgr.pause_recording(now.clone())?;
+
+        let storage = self.storage.lock().unwrap();
+        storage.update_session_state(
+            &transition.session_id,
+            transition.new_state.as_str(),
+            &now,
+        )?;
+
+        Ok(transition)
+    }
+
     pub fn set_mode(&self, mode: Mode) -> Result<(), AppError> {
         let mut mgr = self.session_mgr.lock().unwrap();
         mgr.set_mode(mode)
     }
 
-    // ==================== Pipeline ====================
+    // ==================== Audio Pipeline ====================
+
+    /// パイプラインを開始し、イベント受信チャネルを返す
+    pub fn start_pipeline(
+        &self,
+    ) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
+        let (event_tx, event_rx) = mpsc::channel();
+        let pipeline = AudioPipeline::start(
+            self.stt_engine.clone(),
+            event_tx,
+            VadConfig::default(),
+        )
+        .map_err(|e| AppError::device(e.to_string()))?;
+
+        *self.pipeline.lock().unwrap() = Some(pipeline);
+        Ok(event_rx)
+    }
+
+    /// パイプラインを停止する
+    pub fn stop_pipeline(&self) {
+        if let Some(mut pipeline) = self.pipeline.lock().unwrap().take() {
+            pipeline.stop();
+        }
+    }
+
+    /// パイプラインからの書き起こし結果を処理する
+    /// セグメントをDBに保存し、ポストプロセス済みテキストを返す
+    pub fn on_pipeline_transcript(
+        &self,
+        text: &str,
+        confidence: f32,
+    ) -> Result<String, AppError> {
+        let session_id = self
+            .current_session_id()
+            .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?;
+
+        let segment_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let storage = self.storage.lock().unwrap();
+        storage.insert_segment(&segment_id, &session_id, &now)?;
+
+        // ポストプロセス（正規化 + 辞書置換）
+        let mode_str = {
+            let mgr = self.session_mgr.lock().unwrap();
+            mgr.active().and_then(|s| {
+                serde_json::to_value(s.mode)
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
+        };
+        let dict_entries = storage
+            .get_enabled_dictionary_entries("global", mode_str.as_deref())
+            .unwrap_or_default();
+
+        let processed_text = PostProcessor::process(text, &dict_entries);
+        storage.update_segment_text(&segment_id, &processed_text, confidence)?;
+
+        self.metrics.inc_segments_transcribed();
+
+        Ok(processed_text)
+    }
+
+    // ==================== Pipeline (legacy) ====================
 
     pub fn on_transcript_done(
         &self,

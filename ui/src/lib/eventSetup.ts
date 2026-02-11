@@ -12,13 +12,20 @@ import type {
   RewriteDonePayload,
   ErrorPayload,
 } from "./types";
+
+interface SessionStateChangedPayload {
+  session_id: string;
+  prev_state: string;
+  new_state: SessionState;
+  timestamp: string;
+}
 import { useSessionStore } from "../store/sessionStore";
 import { useToastStore } from "../store/toastStore";
 
 export async function initEventListeners(): Promise<() => void> {
   const unlisteners = await Promise.all([
-    subscribe<SessionState>("session_state_changed", (state) => {
-      useSessionStore.getState()._setSessionState(state);
+    subscribe<SessionStateChangedPayload>("session_state_changed", (payload) => {
+      useSessionStore.getState()._setSessionState(payload.new_state);
     }),
 
     subscribe<AudioLevelPayload>("audio_level", ({ rms }) => {

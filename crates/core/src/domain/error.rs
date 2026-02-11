@@ -46,6 +46,14 @@ impl AppError {
         }
     }
 
+    pub fn device(msg: impl Into<String>) -> Self {
+        Self {
+            code: ErrorCode::Device,
+            message: msg.into(),
+            recoverable: true,
+        }
+    }
+
     pub fn storage(msg: impl Into<String>) -> Self {
         Self {
             code: ErrorCode::Storage,

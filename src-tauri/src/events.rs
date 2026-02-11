@@ -3,6 +3,7 @@ use tauri::{AppHandle, Emitter};
 
 /// イベント名定数
 pub const SESSION_STATE_CHANGED: &str = "session_state_changed";
+pub const AUDIO_LEVEL: &str = "audio_level";
 pub const TRANSCRIPT_PARTIAL: &str = "transcript_partial";
 pub const TRANSCRIPT_FINAL: &str = "transcript_final";
 pub const REWRITE_DONE: &str = "rewrite_done";
@@ -46,6 +47,25 @@ pub struct RewriteDonePayload {
     pub segment_id: String,
     pub text: String,
     pub mode: String,
+}
+
+/// audio_level ペイロード
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioLevelPayload {
+    pub rms: f32,
+}
+
+/// transcript_partial ペイロード
+#[derive(Debug, Clone, Serialize)]
+pub struct TranscriptPartialPayload {
+    pub text: String,
+}
+
+/// transcript_final ペイロード
+#[derive(Debug, Clone, Serialize)]
+pub struct TranscriptFinalPayload {
+    pub text: String,
+    pub confidence: f32,
 }
 
 /// deliver_done ペイロード

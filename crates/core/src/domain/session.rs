@@ -95,6 +95,32 @@ impl SessionManager {
         Ok(session)
     }
 
+    /// pause_recording: Recording→Idle（パイプラインモード用）
+    pub fn pause_recording(&mut self, now: String) -> Result<StateTransition, AppError> {
+        let session = self
+            .active
+            .as_mut()
+            .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?;
+
+        let prev = session.state.as_str().to_string();
+
+        match &session.state {
+            SessionState::Recording => {
+                session.state = SessionState::Idle;
+                session.updated_at = now;
+                Ok(StateTransition {
+                    session_id: session.session_id.clone(),
+                    prev_state: prev,
+                    new_state: session.state.clone(),
+                })
+            }
+            other => Err(AppError::invalid_state(format!(
+                "pause_recording は {} 状態では実行できません",
+                other.as_str()
+            ))),
+        }
+    }
+
     /// toggle_recording: Idle→Recording, Recording→Transcribing
     pub fn toggle_recording(&mut self, now: String) -> Result<StateTransition, AppError> {
         let session = self
