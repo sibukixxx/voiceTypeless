@@ -1,4 +1,6 @@
+pub mod claude;
 mod noop;
+pub mod prompts;
 
 pub use noop::NoopRewriter;
 

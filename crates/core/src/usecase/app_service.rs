@@ -13,6 +13,7 @@ use crate::infra::metrics::{Metrics, MetricsSummary};
 use crate::infra::os_integration::{OsIntegration, PasteResult, PasteRouter, PermissionStatus};
 use crate::infra::output::OutputRouter;
 use crate::infra::post_processor::PostProcessor;
+use crate::infra::rewriter::{RewriteContext, Rewriter};
 use crate::infra::storage::Storage;
 use crate::infra::stt::SttEngine;
 
@@ -23,17 +24,23 @@ pub struct AppService {
     output_router: OutputRouter,
     metrics: Metrics,
     stt_engine: Arc<dyn SttEngine>,
+    rewriter: Arc<dyn Rewriter>,
     pipeline: Mutex<Option<AudioPipeline>>,
 }
 
 impl AppService {
-    pub fn new(storage: Storage, stt_engine: Arc<dyn SttEngine>) -> Self {
+    pub fn new(
+        storage: Storage,
+        stt_engine: Arc<dyn SttEngine>,
+        rewriter: Arc<dyn Rewriter>,
+    ) -> Self {
         Self {
             session_mgr: Mutex::new(SessionManager::new()),
             storage: Mutex::new(storage),
             output_router: OutputRouter::new(),
             metrics: Metrics::new(),
             stt_engine,
+            rewriter,
             pipeline: Mutex::new(None),
         }
     }
@@ -137,11 +144,21 @@ impl AppService {
     pub fn start_pipeline(
         &self,
     ) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
+        // 設定から言語を取得
+        let language = {
+            let storage = self.storage.lock().unwrap();
+            storage
+                .get_settings()
+                .map(|s| s.language)
+                .unwrap_or_else(|_| "ja-JP".to_string())
+        };
+
         let (event_tx, event_rx) = mpsc::channel();
         let pipeline = AudioPipeline::start(
             self.stt_engine.clone(),
             event_tx,
             VadConfig::default(),
+            language,
         )
         .map_err(|e| AppError::device(e.to_string()))?;
 
@@ -157,12 +174,12 @@ impl AppService {
     }
 
     /// パイプラインからの書き起こし結果を処理する
-    /// セグメントをDBに保存し、ポストプロセス済みテキストを返す
+    /// セグメントをDBに保存し、ポストプロセス済みテキストとsegment_idを返す
     pub fn on_pipeline_transcript(
         &self,
         text: &str,
         confidence: f32,
-    ) -> Result<String, AppError> {
+    ) -> Result<(String, String), AppError> {
         let session_id = self
             .current_session_id()
             .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?;
@@ -191,7 +208,38 @@ impl AppService {
 
         self.metrics.inc_segments_transcribed();
 
-        Ok(processed_text)
+        Ok((processed_text, segment_id))
+    }
+
+    /// テキストをリライトする（Claude API 経由）
+    pub async fn rewrite_text(&self, text: &str, mode: Mode) -> Result<String, AppError> {
+        if mode == Mode::Raw {
+            return Ok(text.to_string());
+        }
+
+        // 辞書ヒントを取得
+        let dictionary_hints = {
+            let storage = self.storage.lock().unwrap();
+            let mode_str = serde_json::to_value(mode)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
+            storage
+                .get_enabled_dictionary_entries("global", mode_str.as_deref())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|e| format!("{} → {}", e.pattern, e.replacement))
+                .collect::<Vec<_>>()
+        };
+
+        let ctx = RewriteContext {
+            mode,
+            dictionary_hints,
+        };
+
+        self.rewriter
+            .rewrite(text, ctx)
+            .await
+            .map_err(|e| AppError::internal(format!("リライトエラー: {e}")))
     }
 
     // ==================== Pipeline (legacy) ====================
@@ -476,5 +524,14 @@ impl AppService {
     pub fn current_session_id(&self) -> Option<String> {
         let mgr = self.session_mgr.lock().unwrap();
         mgr.active().map(|s| s.session_id.clone())
+    }
+
+    pub fn current_mode(&self) -> Option<Mode> {
+        let mgr = self.session_mgr.lock().unwrap();
+        mgr.active().map(|s| s.mode)
+    }
+
+    pub fn rewriter_name(&self) -> &str {
+        self.rewriter.name()
     }
 }

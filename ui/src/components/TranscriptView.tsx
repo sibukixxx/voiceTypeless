@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useSessionStore } from "../store/sessionStore";
 
 export function TranscriptView() {
@@ -30,13 +30,7 @@ export function TranscriptView() {
         <div className="space-y-3">
           {/* Confirmed transcripts */}
           {finalTranscripts.map((t, i) => (
-            <div key={i} className="group flex items-start gap-2">
-              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
-              <p className="text-sm leading-relaxed text-gray-200">{t.text}</p>
-              <span className="ml-auto shrink-0 text-xs text-gray-600 opacity-0 group-hover:opacity-100">
-                {(t.confidence * 100).toFixed(0)}%
-              </span>
-            </div>
+            <TranscriptItem key={t.segmentId ?? i} transcript={t} />
           ))}
           {/* Partial transcript (live) */}
           {partialTranscript && (
@@ -49,6 +43,68 @@ export function TranscriptView() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function TranscriptItem({
+  transcript,
+}: {
+  transcript: {
+    text: string;
+    confidence: number;
+    rawText?: string;
+    rewrittenText?: string;
+    isRewriting?: boolean;
+  };
+}) {
+  const [showRaw, setShowRaw] = useState(false);
+  const hasRewrite = !!transcript.rewrittenText;
+  const isRewriting = transcript.isRewriting;
+
+  // Determine indicator color
+  let indicatorClass = "bg-green-500"; // default: confirmed
+  if (isRewriting) {
+    indicatorClass = "bg-yellow-400 animate-pulse";
+  } else if (hasRewrite) {
+    indicatorClass = "bg-purple-400";
+  }
+
+  return (
+    <div className="group flex items-start gap-2">
+      <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${indicatorClass}`} />
+      <div className="min-w-0 flex-1">
+        {isRewriting ? (
+          <p className="text-sm leading-relaxed text-yellow-300/80 italic">
+            Rewriting...
+          </p>
+        ) : (
+          <p className="text-sm leading-relaxed text-gray-200">
+            {transcript.text}
+          </p>
+        )}
+
+        {/* Show raw text toggle for rewritten items */}
+        {hasRewrite && transcript.rawText && !isRewriting && (
+          <details
+            className="mt-1"
+            open={showRaw}
+            onToggle={(e) =>
+              setShowRaw((e.target as HTMLDetailsElement).open)
+            }
+          >
+            <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-400">
+              Original text
+            </summary>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">
+              {transcript.rawText}
+            </p>
+          </details>
+        )}
+      </div>
+      <span className="ml-auto shrink-0 text-xs text-gray-600 opacity-0 group-hover:opacity-100">
+        {(transcript.confidence * 100).toFixed(0)}%
+      </span>
     </div>
   );
 }

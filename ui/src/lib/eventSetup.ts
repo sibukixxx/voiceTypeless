@@ -38,13 +38,17 @@ export async function initEventListeners(): Promise<() => void> {
 
     subscribe<TranscriptFinalPayload>(
       "transcript_final",
-      ({ text, confidence }) => {
-        useSessionStore.getState()._addFinalTranscript(text, confidence);
+      ({ text, confidence, segment_id }) => {
+        useSessionStore.getState()._addFinalTranscript(text, confidence, segment_id);
       },
     ),
 
-    subscribe<RewriteDonePayload>("rewrite_done", ({ text }) => {
-      useSessionStore.getState()._updateLastTranscript(text);
+    subscribe<RewriteDonePayload>("rewrite_done", ({ segment_id, text }) => {
+      if (segment_id) {
+        useSessionStore.getState()._updateRewrite(segment_id, text);
+      } else {
+        useSessionStore.getState()._updateLastTranscript(text);
+      }
       useToastStore.getState().addToast("success", "Rewrite complete");
     }),
 

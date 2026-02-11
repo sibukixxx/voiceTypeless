@@ -3,20 +3,72 @@ mod events;
 
 use std::sync::Arc;
 
+use vt_core::domain::settings::SttEngineChoice;
+use vt_core::infra::rewriter::Rewriter;
 use vt_core::infra::storage::Storage;
 use vt_core::infra::stt::SttEngine;
 use vt_core::usecase::app_service::AppService;
 
-/// STT エンジンを構築する（macOS: Apple Speech, 他: Noop）
-fn create_stt_engine() -> Arc<dyn SttEngine> {
-    #[cfg(target_os = "macos")]
-    {
-        use vt_core::infra::stt::apple_speech::AppleSttEngine;
-        if AppleSttEngine::is_available() {
-            log::info!("Apple Speech STT engine selected");
-            return Arc::new(AppleSttEngine);
+/// リライターを構築する（API Key あり → Claude, なし → Noop）
+fn create_rewriter(storage: &Storage) -> Arc<dyn Rewriter> {
+    let api_key = storage
+        .get_settings()
+        .ok()
+        .and_then(|s| s.claude_api_key)
+        .unwrap_or_default();
+
+    if !api_key.is_empty() {
+        log::info!("Claude rewriter selected (API key configured)");
+        Arc::new(vt_core::infra::rewriter::claude::ClaudeRewriter::new(api_key))
+    } else {
+        log::info!("Using Noop rewriter (no API key)");
+        Arc::new(vt_core::infra::rewriter::NoopRewriter)
+    }
+}
+
+/// STT エンジンを構築する（設定に応じて選択）
+fn create_stt_engine(storage: &Storage) -> Arc<dyn SttEngine> {
+    let settings = storage.get_settings().unwrap_or_default();
+
+    match settings.stt_engine {
+        SttEngineChoice::Apple => {
+            #[cfg(target_os = "macos")]
+            {
+                use vt_core::infra::stt::apple_speech::AppleSttEngine;
+                if AppleSttEngine::is_available() {
+                    log::info!("Apple Speech STT engine selected");
+                    return Arc::new(AppleSttEngine);
+                }
+                log::warn!("Apple Speech not available, falling back to Noop STT");
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                log::warn!("Apple Speech is only available on macOS, falling back to Noop STT");
+            }
         }
-        log::warn!("Apple Speech not available, falling back to Noop STT");
+        SttEngineChoice::Whisper => {
+            use vt_core::infra::stt::whisper::WhisperSttEngine;
+            let model_path = WhisperSttEngine::default_model_path();
+            if model_path.exists() {
+                match WhisperSttEngine::new(&model_path.to_string_lossy()) {
+                    Ok(engine) => {
+                        log::info!("Whisper STT engine selected");
+                        return Arc::new(engine);
+                    }
+                    Err(e) => {
+                        log::error!("Whisper engine init failed: {}, falling back to Noop", e);
+                    }
+                }
+            } else {
+                log::warn!(
+                    "Whisper model not found at {:?}, falling back to Noop STT",
+                    model_path
+                );
+            }
+        }
+        SttEngineChoice::Cloud => {
+            log::warn!("Cloud STT not yet implemented, falling back to Noop STT");
+        }
     }
 
     log::info!("Using Noop STT engine");
@@ -38,8 +90,9 @@ pub fn run() {
     });
 
     let storage = Storage::open(&db_path).expect("SQLite の初期化に失敗しました");
-    let stt_engine = create_stt_engine();
-    let app_service = AppService::new(storage, stt_engine);
+    let stt_engine = create_stt_engine(&storage);
+    let rewriter = create_rewriter(&storage);
+    let app_service = AppService::new(storage, stt_engine, rewriter);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
@@ -61,6 +114,8 @@ pub fn run() {
             commands::get_metrics,
             commands::cleanup_data,
             commands::paste_to_active_app,
+            commands::check_whisper_model,
+            commands::download_whisper_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

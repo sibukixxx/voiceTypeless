@@ -42,6 +42,7 @@ impl AudioPipeline {
         stt_engine: Arc<dyn SttEngine>,
         event_tx: mpsc::Sender<PipelineEvent>,
         vad_config: VadConfig,
+        language: String,
     ) -> Result<Self, AudioCaptureError> {
         // デバイスの事前チェック（高速にエラー検出）
         let _config = capture::check_device()?;
@@ -55,6 +56,7 @@ impl AudioPipeline {
                 stt_engine,
                 event_tx,
                 vad_config,
+                language,
             );
         });
 
@@ -81,6 +83,7 @@ impl AudioPipeline {
         stt_engine: Arc<dyn SttEngine>,
         event_tx: mpsc::Sender<PipelineEvent>,
         vad_config: VadConfig,
+        language: String,
     ) {
         // このスレッド上でキャプチャを開始
         let (sample_tx, sample_rx) = mpsc::channel::<Vec<f32>>();
@@ -143,6 +146,7 @@ impl AudioPipeline {
                                         &event_tx,
                                         std::mem::take(&mut segment_buffer),
                                         sample_rate,
+                                        &language,
                                     );
                                 }
                             }
@@ -167,6 +171,7 @@ impl AudioPipeline {
                 &event_tx,
                 segment_buffer,
                 sample_rate,
+                &language,
             );
         }
     }
@@ -178,13 +183,14 @@ impl AudioPipeline {
         event_tx: &mpsc::Sender<PipelineEvent>,
         samples: Vec<f32>,
         sample_rate: u32,
+        language: &str,
     ) {
         let audio = AudioSegment {
             samples,
             sample_rate,
         };
         let ctx = SttContext {
-            language: "ja-JP".to_string(),
+            language: language.to_string(),
             dictionary: vec![],
         };
 

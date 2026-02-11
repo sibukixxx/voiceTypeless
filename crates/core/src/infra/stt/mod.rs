@@ -1,6 +1,8 @@
 #[cfg(target_os = "macos")]
 pub mod apple_speech;
 mod noop;
+#[cfg(feature = "whisper")]
+pub mod whisper;
 
 pub use noop::NoopSttService;
 

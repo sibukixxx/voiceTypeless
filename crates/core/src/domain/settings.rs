@@ -21,6 +21,10 @@ pub struct AppSettings {
     pub segment_ttl_days: u32,
     /// グローバルホットキー（toggle_recording）
     pub hotkey_toggle: String,
+    /// Claude API キー（ローカル SQLite に保存）
+    pub claude_api_key: Option<String>,
+    /// STT 言語設定（デフォルト "ja-JP"）
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +58,8 @@ impl Default for AppSettings {
             audio_retention: AudioRetention::None,
             segment_ttl_days: 0,
             hotkey_toggle: "CmdOrCtrl+Shift+R".to_string(),
+            claude_api_key: None,
+            language: "ja-JP".to_string(),
         }
     }
 }

@@ -66,6 +66,8 @@ pub struct TranscriptPartialPayload {
 pub struct TranscriptFinalPayload {
     pub text: String,
     pub confidence: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segment_id: Option<String>,
 }
 
 /// deliver_done ペイロード

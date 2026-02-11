@@ -179,15 +179,85 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                 PipelineEvent::TranscriptFinal { text, confidence } => {
                     let service = app.state::<AppService>();
                     match service.on_pipeline_transcript(&text, confidence) {
-                        Ok(processed_text) => {
+                        Ok((processed_text, segment_id)) => {
                             events::emit_event(
                                 &app,
                                 TRANSCRIPT_FINAL,
                                 TranscriptFinalPayload {
-                                    text: processed_text,
+                                    text: processed_text.clone(),
                                     confidence,
+                                    segment_id: Some(segment_id.clone()),
                                 },
                             );
+
+                            // 自動リライト: rewrite_enabled && mode != Raw の場合
+                            let should_rewrite = {
+                                let settings = service.get_settings().ok();
+                                let mode = service.current_mode();
+                                settings
+                                    .map(|s| s.rewrite_enabled)
+                                    .unwrap_or(false)
+                                    && mode.map(|m| m != Mode::Raw).unwrap_or(false)
+                            };
+
+                            if should_rewrite {
+                                let app_clone = app.clone();
+                                let text_for_rewrite = processed_text;
+                                let seg_id = segment_id;
+                                let mode = service.current_mode().unwrap_or(Mode::Raw);
+                                let session_id =
+                                    service.current_session_id().unwrap_or_default();
+
+                                // 非同期でリライト実行（パイプラインをブロックしない）
+                                std::thread::spawn(move || {
+                                    let rt = tokio::runtime::Builder::new_current_thread()
+                                        .enable_all()
+                                        .build();
+                                    if let Ok(rt) = rt {
+                                        let svc = app_clone.state::<AppService>();
+                                        match rt.block_on(
+                                            svc.rewrite_text(&text_for_rewrite, mode),
+                                        ) {
+                                            Ok(rewritten) => {
+                                                let _ =
+                                                    svc.on_rewrite_done(&seg_id, &rewritten);
+                                                events::emit_event(
+                                                    &app_clone,
+                                                    REWRITE_DONE,
+                                                    events::RewriteDonePayload {
+                                                        session_id,
+                                                        segment_id: seg_id,
+                                                        text: rewritten,
+                                                        mode: serde_json::to_value(mode)
+                                                            .ok()
+                                                            .and_then(|v| {
+                                                                v.as_str()
+                                                                    .map(|s| s.to_string())
+                                                            })
+                                                            .unwrap_or_default(),
+                                                    },
+                                                );
+                                            }
+                                            Err(e) => {
+                                                log::error!(
+                                                    "Auto-rewrite failed: {}",
+                                                    e
+                                                );
+                                                events::emit_event(
+                                                    &app_clone,
+                                                    ERROR,
+                                                    ErrorPayload {
+                                                        code: "E_REWRITE".to_string(),
+                                                        message: e.to_string(),
+                                                        recoverable: true,
+                                                        session_id: Some(session_id),
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
+                                });
+                            }
                         }
                         Err(e) => {
                             log::error!("Pipeline transcript processing error: {}", e);
@@ -269,15 +339,14 @@ pub fn list_dictionary(
 }
 
 #[tauri::command]
-pub fn rewrite_last(
+pub async fn rewrite_last(
     app: AppHandle,
     service: State<'_, AppService>,
     mode: Mode,
 ) -> CmdResult<()> {
     let (segment_id, raw_text, _current_mode) = service.get_last_segment_for_rewrite()?;
 
-    // NoopRewriter相当: Phase3でLLM連携に差し替え
-    let rewritten = format!("[rewritten:{}] {}", serde_json::to_value(mode).unwrap_or_default(), raw_text);
+    let rewritten = service.rewrite_text(&raw_text, mode).await?;
 
     service.on_rewrite_done(&segment_id, &rewritten)?;
 
@@ -378,4 +447,59 @@ pub fn paste_to_active_app(
 ) -> CmdResult<PasteResult> {
     let result = service.paste_to_active_app(&text)?;
     Ok(result)
+}
+
+// --- Phase 4 Commands: Whisper ---
+
+#[tauri::command]
+pub fn check_whisper_model() -> bool {
+    vt_core::infra::stt::whisper::WhisperSttEngine::is_model_available()
+}
+
+#[tauri::command]
+pub async fn download_whisper_model() -> CmdResult<String> {
+    let model_path = vt_core::infra::stt::whisper::WhisperSttEngine::default_model_path();
+
+    if model_path.exists() {
+        return Ok(model_path.to_string_lossy().to_string());
+    }
+
+    // モデルディレクトリ作成
+    if let Some(parent) = model_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            vt_core::domain::error::AppError::internal(format!(
+                "モデルディレクトリ作成失敗: {e}"
+            ))
+        })?;
+    }
+
+    let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+
+    let response = reqwest::get(url).await.map_err(|e| {
+        vt_core::domain::error::AppError::internal(format!(
+            "モデルダウンロード失敗: {e}"
+        ))
+    })?;
+
+    if !response.status().is_success() {
+        return Err(vt_core::domain::error::AppError::internal(format!(
+            "モデルダウンロード失敗: HTTP {}",
+            response.status()
+        ))
+        .into());
+    }
+
+    let bytes = response.bytes().await.map_err(|e| {
+        vt_core::domain::error::AppError::internal(format!(
+            "モデルデータ受信失敗: {e}"
+        ))
+    })?;
+
+    std::fs::write(&model_path, &bytes).map_err(|e| {
+        vt_core::domain::error::AppError::internal(format!(
+            "モデルファイル保存失敗: {e}"
+        ))
+    })?;
+
+    Ok(model_path.to_string_lossy().to_string())
 }

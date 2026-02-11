@@ -9,15 +9,20 @@ import { Button } from "../components/ui/Button";
 export function RecorderPage() {
   const sessionState = useSessionStore((s) => s.sessionState);
   const finalTranscripts = useSessionStore((s) => s.finalTranscripts);
+  const currentMode = useSessionStore((s) => s.currentMode);
+  const rewriteEnabled = useSessionStore((s) => s.rewriteEnabled);
+  const setRewriteEnabled = useSessionStore((s) => s.setRewriteEnabled);
   const startSession = useSessionStore((s) => s.startSession);
   const stopSession = useSessionStore((s) => s.stopSession);
   const toggleRecording = useSessionStore((s) => s.toggleRecording);
+  const rewriteLast = useSessionStore((s) => s.rewriteLast);
   const clearTranscripts = useSessionStore((s) => s.clearTranscripts);
   const addToast = useToastStore((s) => s.addToast);
 
   const active = isActiveState(sessionState);
   const recording = isRecording(sessionState);
   const busy = isBusy(sessionState);
+  const isRawMode = currentMode === "raw";
 
   const handleToggle = async () => {
     try {
@@ -50,11 +55,37 @@ export function RecorderPage() {
     }
   };
 
+  const handleManualRewrite = async () => {
+    if (finalTranscripts.length === 0 || isRawMode) return;
+    try {
+      await rewriteLast(currentMode);
+    } catch (e) {
+      console.error("[handleManualRewrite] error:", e);
+      addToast("error", "Rewrite failed");
+    }
+  };
+
   return (
     <div className="flex h-full flex-col gap-3 p-4">
-      {/* Mode selector */}
+      {/* Mode selector + rewrite toggle */}
       <div className="flex items-center justify-between">
         <ModeSelector />
+        <div className="flex items-center gap-2">
+          <label
+            className={`flex cursor-pointer items-center gap-1.5 text-xs ${
+              isRawMode ? "text-gray-600" : "text-gray-400"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={rewriteEnabled}
+              onChange={(e) => setRewriteEnabled(e.target.checked)}
+              disabled={isRawMode}
+              className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 accent-purple-500"
+            />
+            Auto-rewrite
+          </label>
+        </div>
       </div>
 
       {/* Transcript area */}
@@ -82,6 +113,15 @@ export function RecorderPage() {
         )}
 
         <div className="flex-1" />
+
+        <Button
+          variant="ghost"
+          size="md"
+          onClick={handleManualRewrite}
+          disabled={finalTranscripts.length === 0 || isRawMode}
+        >
+          Rewrite
+        </Button>
 
         <Button
           variant="ghost"

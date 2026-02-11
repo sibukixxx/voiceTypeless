@@ -90,9 +90,12 @@ export interface TranscriptPartialPayload {
 export interface TranscriptFinalPayload {
   text: string;
   confidence: number;
+  segment_id?: string;
 }
 
 export interface RewriteDonePayload {
+  session_id: string;
+  segment_id: string;
   text: string;
   mode: string;
 }
@@ -157,6 +160,9 @@ export interface AppSettings {
   audio_retention: AudioRetention;
   hotkey: string;
   paste_allowlist: string[];
+  claude_api_key?: string;
+  language: string;
+  rewrite_enabled: boolean;
 }
 
 // === Permissions (Phase 3) ===
@@ -193,6 +199,10 @@ export interface FinalTranscript {
   text: string;
   confidence: number;
   timestamp: number;
+  segmentId?: string;
+  rawText?: string;
+  rewrittenText?: string;
+  isRewriting?: boolean;
 }
 
 // === Toast (UI internal) ===

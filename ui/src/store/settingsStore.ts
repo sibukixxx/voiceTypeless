@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AppSettings } from "../lib/types";
+import { invokeCommand } from "../lib/coreClient";
 
 const DEFAULT_SETTINGS: AppSettings = {
   stt_engine: "apple",
@@ -7,6 +8,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   audio_retention: "none",
   hotkey: "Cmd+Shift+V",
   paste_allowlist: [],
+  language: "ja-JP",
+  rewrite_enabled: false,
 };
 
 interface SettingsStore {
@@ -14,7 +17,7 @@ interface SettingsStore {
   loading: boolean;
 
   loadSettings: () => Promise<void>;
-  updateSettings: (partial: Partial<AppSettings>) => void;
+  updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
   addToAllowlist: (bundleId: string) => void;
   removeFromAllowlist: (bundleId: string) => void;
 }
@@ -26,38 +29,45 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   loadSettings: async () => {
     set({ loading: true });
     try {
-      // TODO: invokeCommand('get_settings') when Core implements it
-      // For now, use defaults
+      const settings = await invokeCommand<AppSettings>("get_settings");
+      set({ settings: { ...DEFAULT_SETTINGS, ...settings } });
+    } catch (e) {
+      console.error("Failed to load settings:", e);
     } finally {
       set({ loading: false });
     }
   },
 
-  updateSettings: (partial) => {
-    set((s) => ({ settings: { ...s.settings, ...partial } }));
-    // TODO: invokeCommand('update_settings', get().settings) when Core implements it
+  updateSettings: async (partial) => {
+    const newSettings = { ...get().settings, ...partial };
+    set({ settings: newSettings });
+    try {
+      await invokeCommand("update_settings", { settings: newSettings });
+    } catch (e) {
+      console.error("Failed to save settings:", e);
+    }
   },
 
   addToAllowlist: (bundleId) => {
     const current = get().settings.paste_allowlist;
     if (!current.includes(bundleId)) {
-      set((s) => ({
-        settings: {
-          ...s.settings,
-          paste_allowlist: [...current, bundleId],
-        },
-      }));
+      const newSettings = {
+        ...get().settings,
+        paste_allowlist: [...current, bundleId],
+      };
+      set({ settings: newSettings });
+      invokeCommand("update_settings", { settings: newSettings }).catch(console.error);
     }
   },
 
   removeFromAllowlist: (bundleId) => {
-    set((s) => ({
-      settings: {
-        ...s.settings,
-        paste_allowlist: s.settings.paste_allowlist.filter(
-          (id) => id !== bundleId,
-        ),
-      },
-    }));
+    const newSettings = {
+      ...get().settings,
+      paste_allowlist: get().settings.paste_allowlist.filter(
+        (id) => id !== bundleId,
+      ),
+    };
+    set({ settings: newSettings });
+    invokeCommand("update_settings", { settings: newSettings }).catch(console.error);
   },
 }));
