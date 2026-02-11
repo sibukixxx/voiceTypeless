@@ -33,6 +33,8 @@ function resetStores() {
       audio_retention: "none",
       hotkey: "Cmd+Shift+V",
       paste_allowlist: [],
+      language: "ja-JP",
+      rewrite_enabled: false,
     },
     loading: false,
   });
