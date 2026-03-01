@@ -171,9 +171,16 @@ export interface AppSettings {
 }
 
 // === Permissions (Phase 3) ===
+// Rust PermissionState 互換（snake_case 文字列）
+export type PermissionState =
+  | "granted"
+  | "denied"
+  | "not_determined"
+  | "unavailable";
+
 export interface PermissionStatus {
-  microphone: boolean;
-  accessibility: boolean;
+  microphone: PermissionState;
+  accessibility: PermissionState;
 }
 
 // === Metrics ===

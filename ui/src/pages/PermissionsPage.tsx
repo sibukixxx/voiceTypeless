@@ -7,8 +7,8 @@ import type { PermissionStatus } from "../lib/types";
 
 export function PermissionsPage() {
   const [permissions, setPermissions] = useState<PermissionStatus>({
-    microphone: false,
-    accessibility: false,
+    microphone: "not_determined",
+    accessibility: "not_determined",
   });
   const [checking, setChecking] = useState(false);
   const addToast = useToastStore((s) => s.addToast);
@@ -44,14 +44,14 @@ export function PermissionsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span
-              className={`h-3 w-3 rounded-full ${permissions.microphone ? "bg-green-500" : "bg-red-500"}`}
+              className={`h-3 w-3 rounded-full ${permissions.microphone === "granted" ? "bg-green-500" : "bg-red-500"}`}
             />
             <span className="text-sm text-gray-300">
-              {permissions.microphone ? "Granted" : "Not granted"}
+              {permissions.microphone === "granted" ? "Granted" : "Not granted"}
             </span>
           </div>
         </div>
-        {!permissions.microphone && (
+        {permissions.microphone !== "granted" && (
           <div className="mt-3 rounded-lg bg-gray-800/50 p-3 text-xs text-gray-400">
             <p className="font-medium text-gray-300">How to enable:</p>
             <ol className="mt-1 list-inside list-decimal space-y-0.5">
@@ -78,14 +78,14 @@ export function PermissionsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span
-              className={`h-3 w-3 rounded-full ${permissions.accessibility ? "bg-green-500" : "bg-red-500"}`}
+              className={`h-3 w-3 rounded-full ${permissions.accessibility === "granted" ? "bg-green-500" : "bg-red-500"}`}
             />
             <span className="text-sm text-gray-300">
-              {permissions.accessibility ? "Granted" : "Not granted"}
+              {permissions.accessibility === "granted" ? "Granted" : "Not granted"}
             </span>
           </div>
         </div>
-        {!permissions.accessibility && (
+        {permissions.accessibility !== "granted" && (
           <div className="mt-3 rounded-lg bg-gray-800/50 p-3 text-xs text-gray-400">
             <p className="font-medium text-gray-300">How to enable:</p>
             <ol className="mt-1 list-inside list-decimal space-y-0.5">
