@@ -59,4 +59,7 @@ pub trait SttEngine: Send + Sync {
     ) -> Result<TranscriptResult, SttError>;
 
     fn supports_partial(&self) -> bool;
+
+    /// エンジン名を返す（診断・設定画面向け）
+    fn name(&self) -> &str;
 }

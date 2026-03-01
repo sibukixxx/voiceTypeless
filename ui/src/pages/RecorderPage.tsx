@@ -5,6 +5,7 @@ import { isActiveState, isRecording, isBusy } from "../lib/types";
 import { TranscriptView } from "../components/TranscriptView";
 import { AudioMeter } from "../components/AudioMeter";
 import { ModeSelector } from "../components/ModeSelector";
+import { SetupBanner } from "../components/SetupBanner";
 import { Button } from "../components/ui/Button";
 
 export function RecorderPage() {
@@ -68,6 +69,9 @@ export function RecorderPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      {/* Setup banner */}
+      <SetupBanner />
+
       {/* Mode selector + rewrite toggle */}
       <div className="flex items-center justify-between">
         <ModeSelector />

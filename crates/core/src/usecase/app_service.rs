@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use crate::domain::error::AppError;
 use crate::domain::session::{SessionManager, SessionState, StateTransition};
 use crate::domain::settings::AppSettings;
-use crate::domain::types::{DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail};
+use crate::domain::types::{
+    DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail, SetupIssue,
+    SetupStatus,
+};
 use crate::infra::audio::pipeline::{AudioPipeline, PipelineEvent};
 use crate::infra::audio::vad::VadConfig;
 use crate::infra::metrics::{Metrics, MetricsSummary};
@@ -572,5 +575,232 @@ impl AppService {
 
     pub fn rewriter_name(&self) -> &str {
         self.rewriter.name()
+    }
+
+    pub fn stt_engine_name(&self) -> &str {
+        self.stt_engine.name()
+    }
+
+    // ==================== Setup Status ====================
+
+    pub fn check_setup_status(&self) -> SetupStatus {
+        let settings = self
+            .storage
+            .lock()
+            .unwrap()
+            .get_settings()
+            .unwrap_or_default();
+
+        let stt_name = self.stt_engine.name().to_string();
+        let rewriter_name = self.rewriter.name().to_string();
+
+        let mut issues = Vec::new();
+
+        // 1. STT が Noop → 選択されたエンジンに応じたエラーメッセージ
+        if stt_name == "noop" {
+            let (message, action) = match settings.stt_engine {
+                crate::domain::settings::SttEngineChoice::Soniox
+                | crate::domain::settings::SttEngineChoice::Cloud => (
+                    "Soniox API キーが設定されていないため、音声認識が動作しません".to_string(),
+                    "Settings で Soniox API キーを入力してください（変更後はアプリ再起動が必要です）"
+                        .to_string(),
+                ),
+                crate::domain::settings::SttEngineChoice::Whisper => (
+                    format!(
+                        "Whisper モデル（{:?}）がダウンロードされていないため、音声認識が動作しません",
+                        settings.whisper_model_size
+                    ),
+                    "Settings で Whisper モデルをダウンロードしてください（変更後はアプリ再起動が必要です）"
+                        .to_string(),
+                ),
+                crate::domain::settings::SttEngineChoice::Apple => (
+                    "Apple Speech が利用できないため、音声認識が動作しません".to_string(),
+                    "macOS で Speech.framework が有効か確認してください".to_string(),
+                ),
+            };
+            issues.push(SetupIssue {
+                category: "stt".to_string(),
+                severity: "error".to_string(),
+                message,
+                action,
+                navigate_to: Some("settings".to_string()),
+            });
+        }
+
+        // 2. Rewriter が Noop かつ rewrite_enabled → 警告
+        if rewriter_name == "noop" && settings.rewrite_enabled {
+            issues.push(SetupIssue {
+                category: "rewriter".to_string(),
+                severity: "warning".to_string(),
+                message: "Claude API キーが未設定のため、リライト機能が動作しません".to_string(),
+                action: "Settings で Claude API キーを入力してください（変更後はアプリ再起動が必要です）"
+                    .to_string(),
+                navigate_to: Some("settings".to_string()),
+            });
+        }
+
+        // 3. 未実装の配信ターゲット → 警告
+        match settings.default_deliver_target.as_str() {
+            "file_append" => {
+                issues.push(SetupIssue {
+                    category: "delivery".to_string(),
+                    severity: "warning".to_string(),
+                    message: "ファイル追記（file_append）は現在未実装です".to_string(),
+                    action: "Clipboard または Paste をご利用ください".to_string(),
+                    navigate_to: Some("settings".to_string()),
+                });
+            }
+            "webhook" => {
+                issues.push(SetupIssue {
+                    category: "delivery".to_string(),
+                    severity: "warning".to_string(),
+                    message: "Webhook 配信は現在未実装です".to_string(),
+                    action: "Clipboard または Paste をご利用ください".to_string(),
+                    navigate_to: Some("settings".to_string()),
+                });
+            }
+            _ => {}
+        }
+
+        // 4. マイク権限チェック
+        use crate::infra::os_integration::PermissionState;
+        let permissions = self.check_permissions();
+        if permissions.microphone != PermissionState::Granted {
+            issues.push(SetupIssue {
+                category: "permission".to_string(),
+                severity: "error".to_string(),
+                message: "マイクのアクセス権限がありません".to_string(),
+                action: "システム環境設定でマイクへのアクセスを許可してください".to_string(),
+                navigate_to: Some("permissions".to_string()),
+            });
+        }
+
+        let ready = !issues.iter().any(|i| i.severity == "error");
+
+        SetupStatus {
+            ready,
+            issues,
+            active_stt_engine: stt_name,
+            active_rewriter: rewriter_name,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::rewriter::NoopRewriter;
+    use crate::infra::stt::NoopSttEngine;
+
+    fn make_service() -> AppService {
+        let storage = Storage::open_in_memory().unwrap();
+        let stt: Arc<dyn SttEngine> = Arc::new(NoopSttEngine);
+        let rewriter: Arc<dyn Rewriter> = Arc::new(NoopRewriter);
+        AppService::new(storage, stt, rewriter)
+    }
+
+    fn make_service_with_settings(settings: AppSettings) -> AppService {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.save_settings(&settings).unwrap();
+        let stt: Arc<dyn SttEngine> = Arc::new(NoopSttEngine);
+        let rewriter: Arc<dyn Rewriter> = Arc::new(NoopRewriter);
+        AppService::new(storage, stt, rewriter)
+    }
+
+    #[test]
+    fn check_setup_status_reports_noop_stt_as_error() {
+        let service = make_service();
+        let status = service.check_setup_status();
+
+        assert_eq!(status.active_stt_engine, "noop");
+        let stt_issues: Vec<_> = status
+            .issues
+            .iter()
+            .filter(|i| i.category == "stt")
+            .collect();
+        assert_eq!(stt_issues.len(), 1);
+        assert_eq!(stt_issues[0].severity, "error");
+    }
+
+    #[test]
+    fn check_setup_status_reports_noop_rewriter_warning_when_rewrite_enabled() {
+        let mut settings = AppSettings::default();
+        settings.rewrite_enabled = true;
+        let service = make_service_with_settings(settings);
+
+        let status = service.check_setup_status();
+
+        let rewriter_issues: Vec<_> = status
+            .issues
+            .iter()
+            .filter(|i| i.category == "rewriter")
+            .collect();
+        assert_eq!(rewriter_issues.len(), 1);
+        assert_eq!(rewriter_issues[0].severity, "warning");
+    }
+
+    #[test]
+    fn check_setup_status_no_rewriter_warning_when_rewrite_disabled() {
+        let service = make_service();
+        let status = service.check_setup_status();
+
+        let rewriter_issues: Vec<_> = status
+            .issues
+            .iter()
+            .filter(|i| i.category == "rewriter")
+            .collect();
+        assert!(rewriter_issues.is_empty());
+    }
+
+    #[test]
+    fn check_setup_status_reports_file_append_as_warning() {
+        let mut settings = AppSettings::default();
+        settings.default_deliver_target = "file_append".to_string();
+        let service = make_service_with_settings(settings);
+
+        let status = service.check_setup_status();
+
+        let delivery_issues: Vec<_> = status
+            .issues
+            .iter()
+            .filter(|i| i.category == "delivery")
+            .collect();
+        assert_eq!(delivery_issues.len(), 1);
+        assert_eq!(delivery_issues[0].severity, "warning");
+    }
+
+    #[test]
+    fn check_setup_status_reports_webhook_as_warning() {
+        let mut settings = AppSettings::default();
+        settings.default_deliver_target = "webhook".to_string();
+        let service = make_service_with_settings(settings);
+
+        let status = service.check_setup_status();
+
+        let delivery_issues: Vec<_> = status
+            .issues
+            .iter()
+            .filter(|i| i.category == "delivery")
+            .collect();
+        assert_eq!(delivery_issues.len(), 1);
+        assert_eq!(delivery_issues[0].severity, "warning");
+    }
+
+    #[test]
+    fn check_setup_status_ready_false_when_stt_is_noop() {
+        let service = make_service();
+        let status = service.check_setup_status();
+
+        // noop STT → error exists → ready should be false
+        assert!(!status.ready);
+    }
+
+    #[test]
+    fn check_setup_status_engine_names() {
+        let service = make_service();
+        let status = service.check_setup_status();
+
+        assert_eq!(status.active_stt_engine, "noop");
+        assert_eq!(status.active_rewriter, "noop");
     }
 }

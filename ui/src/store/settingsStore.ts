@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { AppSettings } from "../lib/types";
 import { invokeCommand } from "../lib/coreClient";
 import { useToastStore } from "./toastStore";
+import { useSetupStore } from "./setupStore";
 
 const DEFAULT_SETTINGS: AppSettings = {
   stt_engine: "soniox",
@@ -51,6 +52,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set({ settings: newSettings });
     try {
       await invokeCommand("update_settings", { settings: newSettings });
+      // 設定変更後にセットアップ状態を再チェック
+      useSetupStore.getState().checkSetup();
     } catch (e) {
       set({ settings: prev });
       useToastStore.getState().addToast("error", "設定の保存に失敗しました");

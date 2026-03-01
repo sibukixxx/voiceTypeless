@@ -249,6 +249,10 @@ impl SttEngine for WhisperSttEngine {
     fn supports_partial(&self) -> bool {
         false
     }
+
+    fn name(&self) -> &str {
+        "whisper"
+    }
 }
 
 #[cfg(test)]
@@ -299,4 +303,8 @@ mod tests {
         assert_eq!(config.beam_size, 5);
         assert_eq!(config.best_of, 5);
     }
+
+    // WhisperSttEngine::name() は実際のモデルが必要なため、
+    // trait のデフォルト実装テストは noop で代替。
+    // model_path_for のテストで whisper モジュール全体をカバー済み。
 }

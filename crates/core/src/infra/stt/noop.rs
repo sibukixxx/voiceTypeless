@@ -23,6 +23,10 @@ impl SttEngine for NoopSttEngine {
     fn supports_partial(&self) -> bool {
         false
     }
+
+    fn name(&self) -> &str {
+        "noop"
+    }
 }
 
 #[cfg(test)]
@@ -55,5 +59,11 @@ mod tests {
     fn test_noop_does_not_support_partial() {
         let stt = NoopSttEngine;
         assert!(!stt.supports_partial());
+    }
+
+    #[test]
+    fn noop_name_returns_noop() {
+        let stt = NoopSttEngine;
+        assert_eq!(stt.name(), "noop");
     }
 }

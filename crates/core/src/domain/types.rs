@@ -111,3 +111,31 @@ pub enum DictionaryScope {
     Global,
     Mode,
 }
+
+/// セットアップ不備の個別項目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupIssue {
+    /// カテゴリ: "stt", "rewriter", "delivery", "permission"
+    pub category: String,
+    /// 深刻度: "error" (機能不全), "warning" (一部制限)
+    pub severity: String,
+    /// ユーザー向けメッセージ
+    pub message: String,
+    /// 推奨アクション
+    pub action: String,
+    /// 遷移先ページ（例: "settings"）
+    pub navigate_to: Option<String>,
+}
+
+/// セットアップ状態の全体像
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupStatus {
+    /// error が 0 件なら true
+    pub ready: bool,
+    /// 検出された不備リスト
+    pub issues: Vec<SetupIssue>,
+    /// 現在アクティブな STT エンジン名
+    pub active_stt_engine: String,
+    /// 現在アクティブなリライター名
+    pub active_rewriter: String,
+}
