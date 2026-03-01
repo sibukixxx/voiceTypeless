@@ -69,6 +69,14 @@ fn create_stt_engine(storage: &Storage) -> Arc<dyn SttEngine> {
         SttEngineChoice::Cloud => {
             log::warn!("Cloud STT not yet implemented, falling back to Noop STT");
         }
+        SttEngineChoice::Soniox => {
+            let api_key = settings.soniox_api_key.unwrap_or_default();
+            if !api_key.is_empty() {
+                log::info!("Soniox STT engine selected");
+                return Arc::new(vt_core::infra::stt::soniox::SonioxSttEngine::new(api_key));
+            }
+            log::warn!("Soniox API key not configured, falling back to Noop STT");
+        }
     }
 
     log::info!("Using Noop STT engine");

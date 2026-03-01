@@ -53,6 +53,7 @@ pub trait SttEngine: Send + Sync {
 |--------|-------|----------------|-------|
 | Apple Speech | `stt-apple-bridge` | Yes | macOS only, Swift bridge |
 | Whisper.cpp | `crates/core/infra/stt` | No | Local, cross-platform |
+| Soniox | `crates/core/infra/stt` | No | Cloud API (default), requires API key, 60+ languages |
 | Cloud STT | `crates/core/infra/stt` | Yes | Optional, requires API key |
 
 ## Error Types

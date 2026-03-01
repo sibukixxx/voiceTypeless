@@ -23,6 +23,8 @@ pub struct AppSettings {
     pub hotkey_toggle: String,
     /// Claude API キー（ローカル SQLite に保存）
     pub claude_api_key: Option<String>,
+    /// Soniox API キー
+    pub soniox_api_key: Option<String>,
     /// STT 言語設定（デフォルト "ja-JP"）
     pub language: String,
 }
@@ -33,6 +35,7 @@ pub enum SttEngineChoice {
     Apple,
     Whisper,
     Cloud,
+    Soniox,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,7 +52,7 @@ pub enum AudioRetention {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            stt_engine: SttEngineChoice::Apple,
+            stt_engine: SttEngineChoice::Soniox,
             default_mode: "raw".to_string(),
             default_deliver_target: "clipboard".to_string(),
             rewrite_enabled: false,
@@ -59,6 +62,7 @@ impl Default for AppSettings {
             segment_ttl_days: 0,
             hotkey_toggle: "CmdOrCtrl+Shift+R".to_string(),
             claude_api_key: None,
+            soniox_api_key: None,
             language: "ja-JP".to_string(),
         }
     }

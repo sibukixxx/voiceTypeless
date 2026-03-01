@@ -3,7 +3,7 @@ import type { AppSettings } from "../lib/types";
 import { invokeCommand } from "../lib/coreClient";
 
 const DEFAULT_SETTINGS: AppSettings = {
-  stt_engine: "apple",
+  stt_engine: "soniox",
   deliver_policy_type: "clipboard_only",
   audio_retention: "none",
   hotkey: "Cmd+Shift+V",

@@ -9,6 +9,7 @@ import { invokeCommand } from "../lib/coreClient";
 import type { SttEngine, DeliverPolicyType, AudioRetention } from "../lib/types";
 
 const STT_OPTIONS = [
+  { value: "soniox", label: "Soniox", description: "Cloud API, high accuracy (requires API key)" },
   { value: "apple", label: "Apple Speech", description: "macOS built-in, low latency" },
   { value: "whisper", label: "Whisper.cpp", description: "Local, high accuracy" },
   { value: "cloud", label: "Cloud STT", description: "Cloud API (requires network)" },
@@ -92,6 +93,29 @@ export function SettingsPage() {
             updateSettings({ stt_engine: e.target.value as SttEngine })
           }
         />
+        {settings.stt_engine === "soniox" && (
+          <div className="mt-3">
+            <label className="mb-1 block text-xs text-gray-400">
+              Soniox API Key
+            </label>
+            <input
+              type="password"
+              value={settings.soniox_api_key ?? ""}
+              onChange={(e) =>
+                updateSettings({
+                  soniox_api_key: e.target.value || undefined,
+                })
+              }
+              placeholder="Enter Soniox API key"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              {settings.soniox_api_key
+                ? "API key configured"
+                : "API key required — get one at soniox.com"}
+            </p>
+          </div>
+        )}
         {settings.stt_engine === "whisper" && (
           <div className="mt-3 flex items-center gap-3">
             <span
