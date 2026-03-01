@@ -52,7 +52,7 @@ impl VadConfig {
                 silence_timeout_ms: 1000,
                 ..Default::default()
             },
-            SttEngineChoice::Cloud => Self::default(),
+            SttEngineChoice::Cloud | SttEngineChoice::Soniox => Self::default(),
         }
     }
 }
