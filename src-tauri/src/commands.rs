@@ -6,7 +6,9 @@ use tauri::{AppHandle, State};
 use vt_core::domain::error::ErrorCode;
 use vt_core::domain::session::{SessionState, StateTransition};
 use vt_core::domain::settings::AppSettings;
-use vt_core::domain::types::{DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail};
+use vt_core::domain::types::{
+    DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail, SetupStatus,
+};
 use vt_core::infra::audio::pipeline::PipelineEvent;
 use vt_core::infra::metrics::MetricsSummary;
 use vt_core::infra::os_integration::{PasteResult, PermissionStatus};
@@ -336,6 +338,11 @@ pub fn update_settings(service: State<'_, AppService>, settings: AppSettings) ->
 #[tauri::command]
 pub fn check_permissions(service: State<'_, AppService>) -> CmdResult<PermissionStatus> {
     Ok(service.check_permissions())
+}
+
+#[tauri::command]
+pub fn check_setup_status(service: State<'_, AppService>) -> CmdResult<SetupStatus> {
+    Ok(service.check_setup_status())
 }
 
 #[tauri::command]

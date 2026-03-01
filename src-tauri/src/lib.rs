@@ -130,6 +130,7 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::check_permissions,
+            commands::check_setup_status,
             commands::get_metrics,
             commands::cleanup_data,
             commands::paste_to_active_app,
