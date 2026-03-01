@@ -42,6 +42,9 @@ impl AppService {
 
         let resolved = match session.deliver_policy {
             DeliverPolicy::Clipboard => DeliverTarget::Clipboard,
+            DeliverPolicy::Paste => DeliverTarget::Paste,
+            DeliverPolicy::FileAppend => DeliverTarget::FileAppend,
+            DeliverPolicy::Webhook => DeliverTarget::Webhook,
         };
         Ok(resolved)
     }

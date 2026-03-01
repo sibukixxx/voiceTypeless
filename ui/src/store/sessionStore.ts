@@ -3,9 +3,11 @@ import type {
   Mode,
   SessionState,
   DeliverPolicy,
+  DeliverTarget,
   FinalTranscript,
 } from "../lib/types";
 import { invokeCommand } from "../lib/coreClient";
+import { useSettingsStore } from "./settingsStore";
 
 interface SessionStore {
   // State
@@ -45,7 +47,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   startSession: async (mode, deliverPolicy) => {
     const m = mode ?? get().currentMode;
-    const dp: DeliverPolicy = deliverPolicy ?? { target: "clipboard" };
+    const dp: DeliverPolicy = deliverPolicy ?? {
+      target: useSettingsStore.getState().settings.default_deliver_target as DeliverTarget,
+    };
     const sessionId = await invokeCommand<string>("start_session", {
       mode: m,
       deliverPolicy: dp,
