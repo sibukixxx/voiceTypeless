@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigationStore } from "./store/navigationStore";
 import { initEventListeners } from "./lib/eventSetup";
+import { useSettingsStore } from "./store/settingsStore";
 import { AppShell } from "./components/AppShell";
 import { RecorderPage } from "./pages/RecorderPage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -35,6 +36,7 @@ function PageRouter() {
 function App() {
   useEffect(() => {
     const cleanup = initEventListeners();
+    useSettingsStore.getState().loadSettings();
     return () => {
       cleanup.then((fn) => fn());
     };
