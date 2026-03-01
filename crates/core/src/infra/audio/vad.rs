@@ -53,6 +53,7 @@ impl VadConfig {
                 ..Default::default()
             },
             SttEngineChoice::Cloud => Self::default(),
+            SttEngineChoice::Soniox => Self::default(),
         }
     }
 }

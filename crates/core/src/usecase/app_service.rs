@@ -4,9 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::domain::error::AppError;
 use crate::domain::session::{SessionManager, SessionState, StateTransition};
 use crate::domain::settings::AppSettings;
-use crate::domain::types::{
-    DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
-};
+use crate::domain::types::{DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail};
 use crate::infra::audio::pipeline::{AudioPipeline, PipelineEvent};
 use crate::infra::audio::vad::VadConfig;
 use crate::infra::metrics::{Metrics, MetricsSummary};
@@ -141,9 +139,7 @@ impl AppService {
     // ==================== Audio Pipeline ====================
 
     /// パイプラインを開始し、イベント受信チャネルを返す
-    pub fn start_pipeline(
-        &self,
-    ) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
+    pub fn start_pipeline(&self) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
         let storage = self.storage.lock().unwrap();
         let settings = storage.get_settings().unwrap_or_default();
 
@@ -278,12 +274,11 @@ impl AppService {
         let storage = self.storage.lock().unwrap();
         let mode_str = {
             let mgr = self.session_mgr.lock().unwrap();
-            mgr.active()
-                .and_then(|s| {
-                    serde_json::to_value(s.mode)
-                        .ok()
-                        .and_then(|v| v.as_str().map(|s| s.to_string()))
-                })
+            mgr.active().and_then(|s| {
+                serde_json::to_value(s.mode)
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
         };
         let dict_entries = storage
             .get_enabled_dictionary_entries("global", mode_str.as_deref())
@@ -416,9 +411,7 @@ impl AppService {
         }
     }
 
-    pub fn get_last_segment_for_rewrite(
-        &self,
-    ) -> Result<(String, String, Mode), AppError> {
+    pub fn get_last_segment_for_rewrite(&self) -> Result<(String, String, Mode), AppError> {
         let (session_id, mode) = {
             let mgr = self.session_mgr.lock().unwrap();
             let s = mgr
@@ -451,11 +444,7 @@ impl AppService {
         let settings = storage.get_settings()?;
         drop(storage);
 
-        PasteRouter::paste_if_allowlisted(
-            text,
-            &settings.paste_allowlist,
-            settings.paste_confirm,
-        )
+        PasteRouter::paste_if_allowlisted(text, &settings.paste_allowlist, settings.paste_confirm)
     }
 
     // ==================== Queries ====================
@@ -464,9 +453,10 @@ impl AppService {
         &self,
         limit: u32,
         cursor: Option<&str>,
+        query: Option<&str>,
     ) -> Result<HistoryPage, AppError> {
         let storage = self.storage.lock().unwrap();
-        storage.list_history(limit, cursor)
+        storage.list_history(limit, cursor, query)
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionDetail>, AppError> {
@@ -521,8 +511,7 @@ impl AppService {
             return Ok((0, 0));
         }
 
-        let cutoff = chrono::Utc::now()
-            - chrono::Duration::days(ttl_days as i64);
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(ttl_days as i64);
         let cutoff_str = cutoff.to_rfc3339();
 
         let storage = self.storage.lock().unwrap();
