@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 use crate::domain::error::AppError;
 use crate::domain::settings::AppSettings;
@@ -14,8 +14,8 @@ pub struct Storage {
 impl Storage {
     /// 新規接続（ファイルパス指定）
     pub fn open(path: &str) -> Result<Self, AppError> {
-        let conn = Connection::open(path)
-            .map_err(|e| AppError::storage(format!("DB接続に失敗: {e}")))?;
+        let conn =
+            Connection::open(path).map_err(|e| AppError::storage(format!("DB接続に失敗: {e}")))?;
         let storage = Self { conn };
         storage.migrate()?;
         Ok(storage)
@@ -84,12 +84,7 @@ impl Storage {
 
     // --- Sessions ---
 
-    pub fn insert_session(
-        &self,
-        session_id: &str,
-        mode: Mode,
-        now: &str,
-    ) -> Result<(), AppError> {
+    pub fn insert_session(&self, session_id: &str, mode: Mode, now: &str) -> Result<(), AppError> {
         let mode_str = serde_json::to_value(mode)
             .map_err(|e| AppError::internal(format!("mode serialize: {e}")))?;
         self.conn
@@ -277,10 +272,7 @@ impl Storage {
     pub fn delete_dictionary_entry(&self, id: &str) -> Result<bool, AppError> {
         let affected = self
             .conn
-            .execute(
-                "DELETE FROM dictionary_entries WHERE id = ?1",
-                params![id],
-            )
+            .execute("DELETE FROM dictionary_entries WHERE id = ?1", params![id])
             .map_err(|e| AppError::storage(format!("辞書エントリ削除失敗: {e}")))?;
         Ok(affected > 0)
     }
@@ -310,24 +302,105 @@ impl Storage {
         &self,
         limit: u32,
         cursor: Option<&str>,
+        query: Option<&str>,
     ) -> Result<HistoryPage, AppError> {
+        let search_pattern = query
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(|q| format!("%{q}%"));
         let mut stmt;
         let rows: Vec<SessionSummary>;
 
         if let Some(cursor_ts) = cursor {
+            if let Some(pattern) = search_pattern.as_deref() {
+                stmt = self
+                    .conn
+                    .prepare(
+                        "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
+                                (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                         FROM sessions s
+                         WHERE s.created_at < ?1
+                           AND (
+                             s.session_id LIKE ?2 OR
+                             EXISTS (
+                               SELECT 1
+                               FROM segments seg
+                               WHERE seg.session_id = s.session_id
+                                 AND (
+                                   seg.raw_text LIKE ?2 OR
+                                   COALESCE(seg.rewritten_text, '') LIKE ?2
+                                 )
+                             )
+                           )
+                         ORDER BY s.created_at DESC
+                         LIMIT ?3",
+                    )
+                    .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+                rows = stmt
+                    .query_map(params![cursor_ts, pattern, limit + 1], |row| {
+                        Ok(SessionSummary {
+                            session_id: row.get(0)?,
+                            state: row.get(1)?,
+                            mode: parse_mode(row.get::<_, String>(2)?.as_str()),
+                            created_at: row.get(3)?,
+                            updated_at: row.get(4)?,
+                            segment_count: row.get(5)?,
+                        })
+                    })
+                    .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+            } else {
+                stmt = self
+                    .conn
+                    .prepare(
+                        "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
+                                (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                         FROM sessions s
+                         WHERE s.created_at < ?1
+                         ORDER BY s.created_at DESC
+                         LIMIT ?2",
+                    )
+                    .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+                rows = stmt
+                    .query_map(params![cursor_ts, limit + 1], |row| {
+                        Ok(SessionSummary {
+                            session_id: row.get(0)?,
+                            state: row.get(1)?,
+                            mode: parse_mode(row.get::<_, String>(2)?.as_str()),
+                            created_at: row.get(3)?,
+                            updated_at: row.get(4)?,
+                            segment_count: row.get(5)?,
+                        })
+                    })
+                    .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+            }
+        } else if let Some(pattern) = search_pattern.as_deref() {
             stmt = self
                 .conn
                 .prepare(
                     "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
                             (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
                      FROM sessions s
-                     WHERE s.created_at < ?1
+                     WHERE
+                       s.session_id LIKE ?1 OR
+                       EXISTS (
+                         SELECT 1
+                         FROM segments seg
+                         WHERE seg.session_id = s.session_id
+                           AND (
+                             seg.raw_text LIKE ?1 OR
+                             COALESCE(seg.rewritten_text, '') LIKE ?1
+                           )
+                       )
                      ORDER BY s.created_at DESC
                      LIMIT ?2",
                 )
                 .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
             rows = stmt
-                .query_map(params![cursor_ts, limit + 1], |row| {
+                .query_map(params![pattern, limit + 1], |row| {
                     Ok(SessionSummary {
                         session_id: row.get(0)?,
                         state: row.get(1)?,
@@ -542,9 +615,7 @@ mod tests {
     #[test]
     fn test_insert_and_get_session() {
         let storage = Storage::open_in_memory().unwrap();
-        storage
-            .insert_session("s1", Mode::Memo, &now())
-            .unwrap();
+        storage.insert_session("s1", Mode::Memo, &now()).unwrap();
 
         let detail = storage.get_session_detail("s1").unwrap().unwrap();
         assert_eq!(detail.session_id, "s1");
@@ -556,12 +627,8 @@ mod tests {
     #[test]
     fn test_insert_segment_and_update() {
         let storage = Storage::open_in_memory().unwrap();
-        storage
-            .insert_session("s1", Mode::Raw, &now())
-            .unwrap();
-        storage
-            .insert_segment("seg1", "s1", &now())
-            .unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
         storage
             .update_segment_text("seg1", "テスト書き起こし", 0.95)
             .unwrap();
@@ -593,7 +660,7 @@ mod tests {
         }
 
         // Page 1: limit=2
-        let page1 = storage.list_history(2, None).unwrap();
+        let page1 = storage.list_history(2, None, None).unwrap();
         assert_eq!(page1.items.len(), 2);
         assert!(page1.next_cursor.is_some());
         // 最新が先頭
@@ -602,14 +669,14 @@ mod tests {
 
         // Page 2
         let page2 = storage
-            .list_history(2, page1.next_cursor.as_deref())
+            .list_history(2, page1.next_cursor.as_deref(), None)
             .unwrap();
         assert_eq!(page2.items.len(), 2);
         assert_eq!(page2.items[0].session_id, "s2");
 
         // Page 3
         let page3 = storage
-            .list_history(2, page2.next_cursor.as_deref())
+            .list_history(2, page2.next_cursor.as_deref(), None)
             .unwrap();
         assert_eq!(page3.items.len(), 1);
         assert!(page3.next_cursor.is_none());
@@ -618,9 +685,7 @@ mod tests {
     #[test]
     fn test_update_session_state() {
         let storage = Storage::open_in_memory().unwrap();
-        storage
-            .insert_session("s1", Mode::Memo, &now())
-            .unwrap();
+        storage.insert_session("s1", Mode::Memo, &now()).unwrap();
         storage
             .update_session_state("s1", "recording", &now())
             .unwrap();
@@ -632,14 +697,42 @@ mod tests {
     #[test]
     fn test_segment_count_in_history() {
         let storage = Storage::open_in_memory().unwrap();
-        storage
-            .insert_session("s1", Mode::Memo, &now())
-            .unwrap();
+        storage.insert_session("s1", Mode::Memo, &now()).unwrap();
         storage.insert_segment("seg1", "s1", &now()).unwrap();
         storage.insert_segment("seg2", "s1", &now()).unwrap();
 
-        let page = storage.list_history(10, None).unwrap();
+        let page = storage.list_history(10, None, None).unwrap();
         assert_eq!(page.items[0].segment_count, 2);
+    }
+
+    #[test]
+    fn test_list_history_with_query_filters_segments() {
+        let storage = Storage::open_in_memory().unwrap();
+
+        storage
+            .insert_session("s-apple", Mode::Memo, "2025-01-15T10:31:00Z")
+            .unwrap();
+        storage
+            .insert_session("s-rust", Mode::Tech, "2025-01-15T10:32:00Z")
+            .unwrap();
+
+        storage
+            .insert_segment("seg-1", "s-apple", "2025-01-15T10:31:30Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg-1", "apple speech", 0.9)
+            .unwrap();
+
+        storage
+            .insert_segment("seg-2", "s-rust", "2025-01-15T10:32:30Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg-2", "rust tauri", 0.95)
+            .unwrap();
+
+        let page = storage.list_history(10, None, Some("rust")).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].session_id, "s-rust");
     }
 
     #[test]
@@ -838,9 +931,7 @@ mod tests {
             .insert_segment("seg_new", "s1", "2025-06-01T00:00:00Z")
             .unwrap();
 
-        let deleted = storage
-            .delete_old_segments("2025-03-01T00:00:00Z")
-            .unwrap();
+        let deleted = storage.delete_old_segments("2025-03-01T00:00:00Z").unwrap();
         assert_eq!(deleted, 1);
 
         let detail = storage.get_session_detail("s1").unwrap().unwrap();
@@ -862,9 +953,7 @@ mod tests {
             .insert_segment("seg1", "s_new", "2025-06-01T00:00:00Z")
             .unwrap();
 
-        let deleted = storage
-            .delete_old_sessions("2025-12-01T00:00:00Z")
-            .unwrap();
+        let deleted = storage.delete_old_sessions("2025-12-01T00:00:00Z").unwrap();
         // s_old has no segments and is old → deleted
         // s_new has segments → not deleted
         assert_eq!(deleted, 1);

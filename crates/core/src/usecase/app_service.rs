@@ -4,9 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::domain::error::AppError;
 use crate::domain::session::{SessionManager, SessionState, StateTransition};
 use crate::domain::settings::AppSettings;
-use crate::domain::types::{
-    DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail,
-};
+use crate::domain::types::{DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail};
 use crate::infra::audio::pipeline::{AudioPipeline, PipelineEvent};
 use crate::infra::audio::vad::VadConfig;
 use crate::infra::metrics::{Metrics, MetricsSummary};
@@ -476,9 +474,14 @@ impl AppService {
 
     // ==================== Queries ====================
 
-    pub fn get_history(&self, limit: u32, cursor: Option<&str>) -> Result<HistoryPage, AppError> {
+    pub fn get_history(
+        &self,
+        limit: u32,
+        cursor: Option<&str>,
+        query: Option<&str>,
+    ) -> Result<HistoryPage, AppError> {
         let storage = self.storage.lock().unwrap();
-        storage.list_history(limit, cursor)
+        storage.list_history(limit, cursor, query)
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionDetail>, AppError> {

@@ -6,9 +6,7 @@ use tauri::{AppHandle, State};
 use vt_core::domain::error::ErrorCode;
 use vt_core::domain::session::{SessionState, StateTransition};
 use vt_core::domain::settings::AppSettings;
-use vt_core::domain::types::{
-    DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail,
-};
+use vt_core::domain::types::{DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail};
 use vt_core::infra::audio::pipeline::PipelineEvent;
 use vt_core::infra::metrics::MetricsSummary;
 use vt_core::infra::os_integration::{PasteResult, PermissionStatus};
@@ -245,8 +243,7 @@ pub struct GetHistoryArgs {
 
 #[tauri::command]
 pub fn get_history(service: State<'_, AppService>, args: GetHistoryArgs) -> CmdResult<HistoryPage> {
-    let _ = args.query;
-    let page = service.get_history(args.limit, args.cursor.as_deref())?;
+    let page = service.get_history(args.limit, args.cursor.as_deref(), args.query.as_deref())?;
     Ok(page)
 }
 
@@ -305,12 +302,8 @@ pub async fn rewrite_last(
 }
 
 #[tauri::command]
-pub fn deliver_last(
-    app: AppHandle,
-    service: State<'_, AppService>,
-    target: Option<DeliverTarget>,
-) -> CmdResult<()> {
-    let (transition, _text, delivered_target) = service.deliver_last(target)?;
+pub fn deliver_last(app: AppHandle, service: State<'_, AppService>) -> CmdResult<()> {
+    let (transition, _text) = service.deliver_last()?;
 
     events::emit_event(
         &app,
