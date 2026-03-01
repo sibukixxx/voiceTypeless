@@ -18,10 +18,12 @@ cpal = "0.15"
 reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }
 dirs = "5"
 whisper-rs = { version = "0.13", optional = true }
+rubato = { version = "0.15", optional = true }
 
 [features]
-default = ["whisper"]
+default = ["whisper", "high-quality-resample"]
 whisper = ["whisper-rs"]
+high-quality-resample = ["rubato"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

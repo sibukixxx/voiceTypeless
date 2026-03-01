@@ -111,23 +111,25 @@ export interface ErrorPayload {
 }
 
 // === History ===
+// Rust SessionSummary 互換
 export interface HistoryItem {
-  id: string;
   session_id: string;
-  text: string;
+  state: string;
   mode: Mode;
-  confidence: number;
   created_at: string;
+  updated_at: string;
+  segment_count: number;
 }
 
+// Rust HistoryPage 互換
 export interface HistoryPage {
   items: HistoryItem[];
-  cursor: string | null;
-  has_more: boolean;
+  next_cursor: string | null;
 }
 
 // === Dictionary ===
-export type DictionaryScope = "global" | "app" | "project" | "mode";
+// Rust DictionaryScope 互換 (Global | Mode のみ)
+export type DictionaryScope = "global" | "mode";
 
 export interface DictionaryEntry {
   id?: string;
@@ -148,22 +150,24 @@ export interface Prompt {
 
 // === Settings ===
 export type SttEngine = "apple" | "whisper" | "cloud" | "soniox";
-export type AudioRetention = "none" | "1day" | "7days" | "30days";
-export type DeliverPolicyType =
-  | "clipboard_only"
-  | "paste_allowlist"
-  | "confirm";
+export type AudioRetention = "none" | "ttl" | "permanent";
+export type WhisperModelSize = "base" | "small" | "medium" | "large";
 
 export interface AppSettings {
   stt_engine: SttEngine;
-  deliver_policy_type: DeliverPolicyType;
-  audio_retention: AudioRetention;
-  hotkey: string;
+  default_mode: string;
+  default_deliver_target: string;
+  rewrite_enabled: boolean;
   paste_allowlist: string[];
+  paste_confirm: boolean;
+  audio_retention: AudioRetention;
+  segment_ttl_days: number;
+  hotkey_toggle: string;
   claude_api_key?: string;
   soniox_api_key?: string;
   language: string;
-  rewrite_enabled: boolean;
+  vad_max_segment_ms?: number;
+  whisper_model_size: WhisperModelSize;
 }
 
 // === Permissions (Phase 3) ===
@@ -172,18 +176,8 @@ export interface PermissionStatus {
   accessibility: boolean;
 }
 
-// === Metrics (Phase 3) ===
-export interface LatencyMetrics {
-  record_to_transcribe_ms: number;
-  transcribe_to_deliver_ms: number;
-  total_ms: number;
-}
-
-export interface MetricError {
-  timestamp: string;
-  code: string;
-  message: string;
-}
+// === Metrics ===
+// MetricsSummary は MetricsPage 内でローカル定義（Rust MetricsSummary 互換）
 
 // === UI Navigation ===
 export type Page =

@@ -6,16 +6,15 @@ import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Toggle } from "../components/ui/Toggle";
+import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import type { DictionaryEntry, DictionaryScope } from "../lib/types";
 
 const SCOPE_OPTIONS = [
   { value: "global", label: "Global" },
-  { value: "app", label: "App" },
-  { value: "project", label: "Project" },
   { value: "mode", label: "Mode" },
 ];
 
-const FILTER_SCOPES = ["all", "global", "app", "project", "mode"] as const;
+const FILTER_SCOPES = ["all", "global", "mode"] as const;
 
 const EMPTY_ENTRY: DictionaryEntry = {
   pattern: "",
@@ -88,21 +87,11 @@ export function DictionaryPage() {
       </div>
 
       {/* Scope filter */}
-      <div className="flex gap-1">
-        {FILTER_SCOPES.map((scope) => (
-          <button
-            key={scope}
-            onClick={() => setFilterScope(scope)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              filterScope === scope
-                ? "bg-gray-700 text-white"
-                : "text-gray-500 hover:text-gray-300"
-            }`}
-          >
-            {scope === "all" ? "All" : scope.charAt(0).toUpperCase() + scope.slice(1)}
-          </button>
-        ))}
-      </div>
+      <FilterButtonGroup
+        options={FILTER_SCOPES}
+        selected={filterScope}
+        onChange={setFilterScope}
+      />
 
       {/* Edit form */}
       {editingEntry && (

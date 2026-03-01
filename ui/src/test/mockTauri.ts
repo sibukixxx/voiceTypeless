@@ -4,6 +4,10 @@
 
 import { useSessionStore } from "../store/sessionStore";
 import { useToastStore } from "../store/toastStore";
+import { useSettingsStore } from "../store/settingsStore";
+import { useHistoryStore } from "../store/historyStore";
+import { useDictionaryStore } from "../store/dictionaryStore";
+import { useNavigationStore } from "../store/navigationStore";
 import type { SessionState } from "../lib/types";
 
 /**
@@ -54,4 +58,33 @@ export function resetAllStores() {
     sessionId: null,
   });
   useToastStore.setState({ toasts: [] });
+  useSettingsStore.setState({
+    settings: {
+      stt_engine: "apple",
+      default_mode: "raw",
+      default_deliver_target: "clipboard",
+      rewrite_enabled: false,
+      paste_allowlist: [],
+      paste_confirm: true,
+      audio_retention: "none",
+      segment_ttl_days: 0,
+      hotkey_toggle: "CmdOrCtrl+Shift+R",
+      language: "ja-JP",
+      whisper_model_size: "base",
+    },
+    loading: false,
+  });
+  useHistoryStore.setState({
+    items: [],
+    query: "",
+    nextCursor: null,
+    loading: false,
+    filterMode: "all",
+  });
+  useDictionaryStore.setState({
+    entries: [],
+    loading: false,
+    filterScope: "all",
+  });
+  useNavigationStore.setState({ currentPage: "recorder" });
 }

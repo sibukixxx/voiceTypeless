@@ -16,8 +16,7 @@ function resetStores() {
   useHistoryStore.setState({
     items: [],
     query: "",
-    cursor: null,
-    hasMore: false,
+    nextCursor: null,
     loading: false,
     filterMode: "all",
   });
@@ -29,12 +28,16 @@ function resetStores() {
   useSettingsStore.setState({
     settings: {
       stt_engine: "apple",
-      deliver_policy_type: "clipboard_only",
-      audio_retention: "none",
-      hotkey: "Cmd+Shift+V",
-      paste_allowlist: [],
-      language: "ja-JP",
+      default_mode: "raw",
+      default_deliver_target: "clipboard",
       rewrite_enabled: false,
+      paste_allowlist: [],
+      paste_confirm: true,
+      audio_retention: "none",
+      segment_ttl_days: 0,
+      hotkey_toggle: "CmdOrCtrl+Shift+R",
+      language: "ja-JP",
+      whisper_model_size: "base",
     },
     loading: false,
   });
@@ -73,18 +76,18 @@ describe("HistoryPage", () => {
     useHistoryStore.setState({
       items: [
         {
-          id: "1",
-          session_id: "s1",
-          text: "Test transcript",
+          session_id: "s1234567-abcd",
+          state: "idle",
           mode: "raw",
-          confidence: 0.9,
           created_at: "2025-01-01T00:00:00Z",
+          updated_at: "2025-01-01T00:01:00Z",
+          segment_count: 3,
         },
       ],
     });
     render(<HistoryPage />);
     await waitFor(() => {
-      expect(screen.getByText("Test transcript")).toBeInTheDocument();
+      expect(screen.getByText(/s1234567/)).toBeInTheDocument();
     });
   });
 
@@ -92,45 +95,44 @@ describe("HistoryPage", () => {
     useHistoryStore.setState({
       items: [
         {
-          id: "1",
-          session_id: "s1",
-          text: "Raw text",
+          session_id: "s1-raw",
+          state: "idle",
           mode: "raw",
-          confidence: 0.9,
           created_at: "2025-01-01T00:00:00Z",
+          updated_at: "2025-01-01T00:01:00Z",
+          segment_count: 1,
         },
         {
-          id: "2",
-          session_id: "s2",
-          text: "Memo text",
+          session_id: "s2-memo",
+          state: "idle",
           mode: "memo",
-          confidence: 0.8,
           created_at: "2025-01-01T00:00:00Z",
+          updated_at: "2025-01-01T00:01:00Z",
+          segment_count: 2,
         },
       ],
     });
     render(<HistoryPage />);
     await waitFor(() => {
-      expect(screen.getByText("Raw text")).toBeInTheDocument();
+      expect(screen.getByText(/s1-raw/)).toBeInTheDocument();
     });
     // Click the filter button (first "Memo"), not the item badge
     fireEvent.click(screen.getAllByText("Memo")[0]);
-    expect(screen.getByText("Memo text")).toBeInTheDocument();
-    expect(screen.queryByText("Raw text")).not.toBeInTheDocument();
+    expect(screen.getByText(/s2-memo/)).toBeInTheDocument();
+    expect(screen.queryByText(/s1-raw/)).not.toBeInTheDocument();
   });
 
-  it("shows Load more when hasMore", async () => {
+  it("shows Load more when nextCursor exists", async () => {
     useHistoryStore.setState({
-      hasMore: true,
-      cursor: "next",
+      nextCursor: "next",
       items: [
         {
-          id: "1",
           session_id: "s1",
-          text: "Item",
+          state: "idle",
           mode: "raw",
-          confidence: 0.9,
           created_at: "2025-01-01T00:00:00Z",
+          updated_at: "2025-01-01T00:01:00Z",
+          segment_count: 1,
         },
       ],
     });
@@ -211,58 +213,75 @@ describe("DictionaryPage", () => {
     render(<DictionaryPage />);
     expect(screen.getByText("All")).toBeInTheDocument();
     expect(screen.getByText("Global")).toBeInTheDocument();
-    expect(screen.getByText("App")).toBeInTheDocument();
+    expect(screen.getByText("Mode")).toBeInTheDocument();
   });
 });
 
 describe("SettingsPage", () => {
   beforeEach(resetStores);
 
-  it("renders settings sections", () => {
+  it("renders settings sections", async () => {
     render(<SettingsPage />);
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Settings")).toBeInTheDocument();
+    });
     expect(screen.getByText("STT Engine")).toBeInTheDocument();
-    expect(screen.getByText("Output Policy")).toBeInTheDocument();
+    expect(screen.getByText("Output Target")).toBeInTheDocument();
     expect(screen.getByText("Audio Retention")).toBeInTheDocument();
     expect(screen.getByText("Hotkey")).toBeInTheDocument();
   });
 
-  it("shows current hotkey", () => {
+  it("shows current hotkey", async () => {
     render(<SettingsPage />);
-    expect(screen.getByText("Cmd+Shift+V")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("CmdOrCtrl+Shift+R")).toBeInTheDocument();
+    });
   });
 
-  it("renders Permissions and Metrics links", () => {
+  it("renders Permissions and Metrics links", async () => {
     render(<SettingsPage />);
-    expect(screen.getByText("Permissions")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Permissions")).toBeInTheDocument();
+    });
     expect(screen.getByText("Metrics")).toBeInTheDocument();
   });
 
-  it("navigates to permissions", () => {
+  it("navigates to permissions", async () => {
     render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Permissions")).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByText("Permissions"));
     expect(useNavigationStore.getState().currentPage).toBe("permissions");
   });
 
-  it("navigates to metrics", () => {
+  it("navigates to metrics", async () => {
     render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Metrics")).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByText("Metrics"));
     expect(useNavigationStore.getState().currentPage).toBe("metrics");
   });
 
-  it("shows Manage Allowlist when paste_allowlist policy", () => {
+  it("shows Manage Allowlist when paste target", async () => {
     useSettingsStore.setState({
       settings: {
         ...useSettingsStore.getState().settings,
-        deliver_policy_type: "paste_allowlist",
+        default_deliver_target: "paste",
       },
     });
     render(<SettingsPage />);
-    expect(screen.getByText("Manage Allowlist")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Manage Allowlist")).toBeInTheDocument();
+    });
   });
 
-  it("hides Manage Allowlist for clipboard_only policy", () => {
+  it("hides Manage Allowlist for clipboard target", async () => {
     render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Settings")).toBeInTheDocument();
+    });
     expect(screen.queryByText("Manage Allowlist")).not.toBeInTheDocument();
   });
 });
@@ -300,17 +319,16 @@ describe("MetricsPage", () => {
   it("renders metrics sections", () => {
     render(<MetricsPage />);
     expect(screen.getByText("Metrics")).toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.getByText("Latency")).toBeInTheDocument();
-    expect(screen.getByText("Recent Errors")).toBeInTheDocument();
-    expect(screen.getByText("Log Viewer")).toBeInTheDocument();
   });
 
   it("shows placeholder labels", () => {
     render(<MetricsPage />);
-    expect(screen.getByText("--")).toBeInTheDocument();
-    expect(screen.getByText("Avg total")).toBeInTheDocument();
+    const dashes = screen.getAllByText("--");
+    expect(dashes.length).toBeGreaterThanOrEqual(3);
     expect(screen.getByText("Sessions")).toBeInTheDocument();
-    expect(screen.getByText("Errors")).toBeInTheDocument();
+    expect(screen.getByText("Transcribed")).toBeInTheDocument();
   });
 
   it("shows Reset button", () => {
@@ -339,11 +357,11 @@ describe("PasteAllowlistPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides warning when in paste_allowlist mode", () => {
+  it("hides warning when in paste mode", () => {
     useSettingsStore.setState({
       settings: {
         ...useSettingsStore.getState().settings,
-        deliver_policy_type: "paste_allowlist",
+        default_deliver_target: "paste",
       },
     });
     render(<PasteAllowlistPage />);

@@ -144,21 +144,43 @@ impl AppService {
     pub fn start_pipeline(
         &self,
     ) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
-        // 設定から言語を取得
-        let language = {
-            let storage = self.storage.lock().unwrap();
-            storage
-                .get_settings()
-                .map(|s| s.language)
-                .unwrap_or_else(|_| "ja-JP".to_string())
+        let storage = self.storage.lock().unwrap();
+        let settings = storage.get_settings().unwrap_or_default();
+
+        // エンジンに応じた VAD 設定
+        let mut vad_config = VadConfig::for_engine(settings.stt_engine);
+        // ユーザーオーバーライド
+        if let Some(max_ms) = settings.vad_max_segment_ms {
+            vad_config.max_segment_ms = max_ms;
+        }
+
+        let language = settings.language.clone();
+
+        // 辞書ヒントを取得
+        let mode_str = {
+            let mgr = self.session_mgr.lock().unwrap();
+            mgr.active().and_then(|s| {
+                serde_json::to_value(s.mode)
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
         };
+        let dictionary_hints: Vec<String> = storage
+            .get_enabled_dictionary_entries("global", mode_str.as_deref())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.replacement.clone())
+            .collect();
+
+        drop(storage);
 
         let (event_tx, event_rx) = mpsc::channel();
         let pipeline = AudioPipeline::start(
             self.stt_engine.clone(),
             event_tx,
-            VadConfig::default(),
+            vad_config,
             language,
+            dictionary_hints,
         )
         .map_err(|e| AppError::device(e.to_string()))?;
 

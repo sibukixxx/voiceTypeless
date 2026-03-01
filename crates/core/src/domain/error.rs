@@ -19,6 +19,24 @@ pub enum ErrorCode {
     Storage,
     #[serde(rename = "E_REWRITE")]
     Rewrite,
+    #[serde(rename = "E_PIPELINE")]
+    Pipeline,
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorCode::Permission => write!(f, "E_PERMISSION"),
+            ErrorCode::Device => write!(f, "E_DEVICE"),
+            ErrorCode::Timeout => write!(f, "E_TIMEOUT"),
+            ErrorCode::SttUnavailable => write!(f, "E_STT_UNAVAILABLE"),
+            ErrorCode::InvalidState => write!(f, "E_INVALID_STATE"),
+            ErrorCode::Internal => write!(f, "E_INTERNAL"),
+            ErrorCode::Storage => write!(f, "E_STORAGE"),
+            ErrorCode::Rewrite => write!(f, "E_REWRITE"),
+            ErrorCode::Pipeline => write!(f, "E_PIPELINE"),
+        }
+    }
 }
 
 /// アプリケーションエラー（イベントペイロード兼用）

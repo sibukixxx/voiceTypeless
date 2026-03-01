@@ -3,7 +3,8 @@ use std::sync::mpsc;
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
-use vt_core::domain::session::SessionState;
+use vt_core::domain::error::ErrorCode;
+use vt_core::domain::session::{SessionState, StateTransition};
 use vt_core::domain::settings::AppSettings;
 use vt_core::domain::types::{
     DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
@@ -38,6 +39,20 @@ impl serde::Serialize for CommandError {
 
 type CmdResult<T> = Result<T, CommandError>;
 
+/// SessionStateChangedPayload 構築+送信ヘルパー
+fn emit_state_changed(app: &AppHandle, transition: &StateTransition) {
+    events::emit_event(
+        app,
+        SESSION_STATE_CHANGED,
+        SessionStateChangedPayload {
+            session_id: transition.session_id.clone(),
+            prev_state: transition.prev_state.clone(),
+            new_state: transition.new_state.as_str().to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        },
+    );
+}
+
 // --- Commands ---
 
 #[tauri::command(rename_all = "camelCase")]
@@ -50,16 +65,7 @@ pub fn start_session(
     log::info!("start_session called: mode={:?}", mode);
     let (session_id, transition) = service.start_session(mode, deliver_policy)?;
 
-    events::emit_event(
-        &app,
-        SESSION_STATE_CHANGED,
-        SessionStateChangedPayload {
-            session_id: session_id.clone(),
-            prev_state: transition.prev_state,
-            new_state: transition.new_state.as_str().to_string(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-        },
-    );
+    emit_state_changed(&app, &transition);
 
     Ok(session_id)
 }
@@ -72,16 +78,7 @@ pub fn stop_session(
     let transition = service.stop_session()?;
 
     if let Some(t) = transition {
-        events::emit_event(
-            &app,
-            SESSION_STATE_CHANGED,
-            SessionStateChangedPayload {
-                session_id: t.session_id,
-                prev_state: t.prev_state,
-                new_state: t.new_state.as_str().to_string(),
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            },
-        );
+        emit_state_changed(&app, &t);
     }
 
     Ok(())
@@ -97,29 +94,11 @@ pub fn toggle_recording(
     if current_state.as_deref() == Some("recording") {
         // 録音中 → 一時停止（パイプライン停止 + Recording→Idle）
         let transition = service.pause_recording()?;
-        events::emit_event(
-            &app,
-            SESSION_STATE_CHANGED,
-            SessionStateChangedPayload {
-                session_id: transition.session_id,
-                prev_state: transition.prev_state,
-                new_state: transition.new_state.as_str().to_string(),
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            },
-        );
+        emit_state_changed(&app, &transition);
     } else {
         // Idle → Recording（パイプライン開始）
         let transition = service.toggle_recording()?;
-        events::emit_event(
-            &app,
-            SESSION_STATE_CHANGED,
-            SessionStateChangedPayload {
-                session_id: transition.session_id.clone(),
-                prev_state: transition.prev_state.clone(),
-                new_state: transition.new_state.as_str().to_string(),
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            },
-        );
+        emit_state_changed(&app, &transition);
 
         if transition.new_state == SessionState::Recording {
             match service.start_pipeline() {
@@ -130,22 +109,13 @@ pub fn toggle_recording(
                     log::error!("Failed to start audio pipeline: {}", e);
                     // パイプライン開始失敗 → Idle に戻す
                     if let Ok(revert) = service.pause_recording() {
-                        events::emit_event(
-                            &app,
-                            SESSION_STATE_CHANGED,
-                            SessionStateChangedPayload {
-                                session_id: revert.session_id.clone(),
-                                prev_state: revert.prev_state,
-                                new_state: revert.new_state.as_str().to_string(),
-                                timestamp: chrono::Utc::now().to_rfc3339(),
-                            },
-                        );
+                        emit_state_changed(&app, &revert);
                     }
                     events::emit_event(
                         &app,
                         ERROR,
                         ErrorPayload {
-                            code: "E_DEVICE".to_string(),
+                            code: ErrorCode::Device,
                             message: e.to_string(),
                             recoverable: true,
                             session_id: service.current_session_id(),
@@ -228,13 +198,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                                                         session_id,
                                                         segment_id: seg_id,
                                                         text: rewritten,
-                                                        mode: serde_json::to_value(mode)
-                                                            .ok()
-                                                            .and_then(|v| {
-                                                                v.as_str()
-                                                                    .map(|s| s.to_string())
-                                                            })
-                                                            .unwrap_or_default(),
+                                                        mode: mode.to_string(),
                                                     },
                                                 );
                                             }
@@ -247,7 +211,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                                                     &app_clone,
                                                     ERROR,
                                                     ErrorPayload {
-                                                        code: "E_REWRITE".to_string(),
+                                                        code: ErrorCode::Rewrite,
                                                         message: e.to_string(),
                                                         recoverable: true,
                                                         session_id: Some(session_id),
@@ -269,7 +233,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                         &app,
                         ERROR,
                         ErrorPayload {
-                            code: "E_PIPELINE".to_string(),
+                            code: ErrorCode::Pipeline,
                             message: msg,
                             recoverable: true,
                             session_id: None,
@@ -358,10 +322,7 @@ pub async fn rewrite_last(
             session_id,
             segment_id,
             text: rewritten,
-            mode: serde_json::to_value(mode)
-                .ok()
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_default(),
+            mode: mode.to_string(),
         },
     );
 
@@ -384,16 +345,7 @@ pub fn deliver_last(
         },
     );
 
-    events::emit_event(
-        &app,
-        SESSION_STATE_CHANGED,
-        SessionStateChangedPayload {
-            session_id: transition.session_id,
-            prev_state: transition.prev_state,
-            new_state: transition.new_state.as_str().to_string(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-        },
-    );
+    emit_state_changed(&app, &transition);
 
     Ok(())
 }
@@ -451,14 +403,26 @@ pub fn paste_to_active_app(
 
 // --- Phase 4 Commands: Whisper ---
 
-#[tauri::command]
-pub fn check_whisper_model() -> bool {
-    vt_core::infra::stt::whisper::WhisperSttEngine::is_model_available()
+fn parse_model_size(s: Option<String>) -> vt_core::domain::settings::WhisperModelSize {
+    use vt_core::domain::settings::WhisperModelSize;
+    match s.as_deref() {
+        Some("small") => WhisperModelSize::Small,
+        Some("medium") => WhisperModelSize::Medium,
+        Some("large") => WhisperModelSize::Large,
+        _ => WhisperModelSize::Base,
+    }
 }
 
 #[tauri::command]
-pub async fn download_whisper_model() -> CmdResult<String> {
-    let model_path = vt_core::infra::stt::whisper::WhisperSttEngine::default_model_path();
+pub fn check_whisper_model(model_size: Option<String>) -> bool {
+    let size = parse_model_size(model_size);
+    vt_core::infra::stt::whisper::WhisperSttEngine::is_model_available_for(size)
+}
+
+#[tauri::command]
+pub async fn download_whisper_model(model_size: Option<String>) -> CmdResult<String> {
+    let size = parse_model_size(model_size);
+    let model_path = vt_core::infra::stt::whisper::WhisperSttEngine::model_path_for(size);
 
     if model_path.exists() {
         return Ok(model_path.to_string_lossy().to_string());
@@ -473,9 +437,9 @@ pub async fn download_whisper_model() -> CmdResult<String> {
         })?;
     }
 
-    let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+    let url = size.download_url();
 
-    let response = reqwest::get(url).await.map_err(|e| {
+    let response = reqwest::get(&url).await.map_err(|e| {
         vt_core::domain::error::AppError::internal(format!(
             "モデルダウンロード失敗: {e}"
         ))

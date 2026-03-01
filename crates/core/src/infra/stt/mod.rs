@@ -5,7 +5,7 @@ pub mod soniox;
 #[cfg(feature = "whisper")]
 pub mod whisper;
 
-pub use noop::NoopSttService;
+pub use noop::NoopSttEngine;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

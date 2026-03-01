@@ -6,7 +6,7 @@ import { Card, CardHeader } from "../components/ui/Card";
 import { Select } from "../components/ui/Select";
 import { Button } from "../components/ui/Button";
 import { invokeCommand } from "../lib/coreClient";
-import type { SttEngine, DeliverPolicyType, AudioRetention } from "../lib/types";
+import type { SttEngine, AudioRetention, WhisperModelSize } from "../lib/types";
 
 const STT_OPTIONS = [
   { value: "soniox", label: "Soniox", description: "Cloud API, high accuracy (requires API key)" },
@@ -15,17 +15,24 @@ const STT_OPTIONS = [
   { value: "cloud", label: "Cloud STT", description: "Cloud API (requires network)" },
 ];
 
+const WHISPER_MODEL_OPTIONS = [
+  { value: "base", label: "Base (148 MB)", description: "Fast, lower accuracy" },
+  { value: "small", label: "Small (488 MB)", description: "Balanced" },
+  { value: "medium", label: "Medium (1.5 GB)", description: "High accuracy" },
+  { value: "large", label: "Large (3.1 GB)", description: "Best accuracy, slow" },
+];
+
 const DELIVER_OPTIONS = [
-  { value: "clipboard_only", label: "Clipboard Only" },
-  { value: "paste_allowlist", label: "Paste Allowlist" },
-  { value: "confirm", label: "Confirm Each Time" },
+  { value: "clipboard", label: "Clipboard Only" },
+  { value: "paste", label: "Paste to App" },
+  { value: "file_append", label: "File Append" },
+  { value: "webhook", label: "Webhook" },
 ];
 
 const RETENTION_OPTIONS = [
   { value: "none", label: "Do not save" },
-  { value: "1day", label: "1 day" },
-  { value: "7days", label: "7 days" },
-  { value: "30days", label: "30 days" },
+  { value: "ttl", label: "TTL (auto-delete)" },
+  { value: "permanent", label: "Permanent" },
 ];
 
 const LANGUAGE_OPTIONS = [
@@ -49,15 +56,23 @@ export function SettingsPage() {
   // Load settings and check whisper model on mount
   useEffect(() => {
     loadSettings();
-    invokeCommand<boolean>("check_whisper_model")
+  }, [loadSettings]);
+
+  // Re-check model availability when model size changes
+  useEffect(() => {
+    invokeCommand<boolean>("check_whisper_model", {
+      modelSize: settings.whisper_model_size ?? "base",
+    })
       .then(setWhisperModelAvailable)
       .catch(() => setWhisperModelAvailable(false));
-  }, [loadSettings]);
+  }, [settings.whisper_model_size]);
 
   const handleDownloadModel = async () => {
     setDownloading(true);
     try {
-      await invokeCommand<string>("download_whisper_model");
+      await invokeCommand<string>("download_whisper_model", {
+        modelSize: settings.whisper_model_size ?? "base",
+      });
       setWhisperModelAvailable(true);
       addToast("success", "Whisper model downloaded");
     } catch (e) {
@@ -117,28 +132,44 @@ export function SettingsPage() {
           </div>
         )}
         {settings.stt_engine === "whisper" && (
-          <div className="mt-3 flex items-center gap-3">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                whisperModelAvailable ? "bg-green-500" : "bg-red-500"
-              }`}
-            />
-            <span className="text-xs text-gray-400">
-              {whisperModelAvailable
-                ? "Model ready"
-                : "Model not found"}
-            </span>
-            {!whisperModelAvailable && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleDownloadModel}
-                disabled={downloading}
-              >
-                {downloading ? "Downloading..." : "Download Model"}
-              </Button>
-            )}
-          </div>
+          <>
+            <div className="mt-3">
+              <label className="mb-1 block text-xs text-gray-400">
+                Model Size
+              </label>
+              <Select
+                options={WHISPER_MODEL_OPTIONS}
+                value={settings.whisper_model_size ?? "base"}
+                onChange={(e) =>
+                  updateSettings({
+                    whisper_model_size: e.target.value as WhisperModelSize,
+                  })
+                }
+              />
+            </div>
+            <div className="mt-3 flex items-center gap-3">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  whisperModelAvailable ? "bg-green-500" : "bg-red-500"
+                }`}
+              />
+              <span className="text-xs text-gray-400">
+                {whisperModelAvailable
+                  ? "Model ready"
+                  : "Model not found"}
+              </span>
+              {!whisperModelAvailable && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleDownloadModel}
+                  disabled={downloading}
+                >
+                  {downloading ? "Downloading..." : "Download Model"}
+                </Button>
+              )}
+            </div>
+          </>
         )}
       </Card>
 
@@ -181,23 +212,34 @@ export function SettingsPage() {
         </p>
       </Card>
 
-      {/* Deliver Policy */}
+      {/* Deliver Target */}
       <Card>
         <CardHeader
-          title="Output Policy"
+          title="Output Target"
           description="How transcribed text is delivered"
         />
         <Select
           options={DELIVER_OPTIONS}
-          value={settings.deliver_policy_type}
+          value={settings.default_deliver_target}
           onChange={(e) =>
             updateSettings({
-              deliver_policy_type: e.target.value as DeliverPolicyType,
+              default_deliver_target: e.target.value,
             })
           }
         />
-        {settings.deliver_policy_type === "paste_allowlist" && (
-          <div className="mt-3">
+        {settings.default_deliver_target === "paste" && (
+          <div className="mt-3 space-y-2">
+            <label className="flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={settings.paste_confirm}
+                onChange={(e) =>
+                  updateSettings({ paste_confirm: e.target.checked })
+                }
+                className="rounded"
+              />
+              Confirm before pasting
+            </label>
             <Button
               variant="secondary"
               size="sm"
@@ -234,7 +276,7 @@ export function SettingsPage() {
         />
         <div className="flex items-center gap-3">
           <kbd className="rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm font-mono text-gray-300">
-            {settings.hotkey}
+            {settings.hotkey_toggle}
           </kbd>
         </div>
       </Card>

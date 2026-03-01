@@ -1,5 +1,6 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use vt_core::domain::error::ErrorCode;
 
 /// イベント名定数
 pub const SESSION_STATE_CHANGED: &str = "session_state_changed";
@@ -33,7 +34,7 @@ pub struct SessionStateChangedPayload {
 /// error ペイロード
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorPayload {
-    pub code: String,
+    pub code: ErrorCode,
     pub message: String,
     pub recoverable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -27,6 +27,10 @@ pub struct AppSettings {
     pub soniox_api_key: Option<String>,
     /// STT 言語設定（デフォルト "ja-JP"）
     pub language: String,
+    /// VAD セグメント最大長のオーバーライド（ms, None=エンジンデフォルト）
+    pub vad_max_segment_ms: Option<u64>,
+    /// Whisper モデルサイズ
+    pub whisper_model_size: WhisperModelSize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +53,41 @@ pub enum AudioRetention {
     Permanent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WhisperModelSize {
+    Base,
+    Small,
+    Medium,
+    Large,
+}
+
+impl Default for WhisperModelSize {
+    fn default() -> Self {
+        Self::Base
+    }
+}
+
+impl WhisperModelSize {
+    /// モデルファイル名を返す
+    pub fn filename(&self) -> &str {
+        match self {
+            Self::Base => "ggml-base.bin",
+            Self::Small => "ggml-small.bin",
+            Self::Medium => "ggml-medium.bin",
+            Self::Large => "ggml-large-v3.bin",
+        }
+    }
+
+    /// ダウンロード URL を返す
+    pub fn download_url(&self) -> String {
+        let file = self.filename();
+        format!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}"
+        )
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -64,6 +103,8 @@ impl Default for AppSettings {
             claude_api_key: None,
             soniox_api_key: None,
             language: "ja-JP".to_string(),
+            vad_max_segment_ms: None,
+            whisper_model_size: WhisperModelSize::Base,
         }
     }
 }

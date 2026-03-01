@@ -4,6 +4,7 @@ import { useToastStore } from "../store/toastStore";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { MODE_LABELS } from "../lib/types";
 import type { Mode } from "../lib/types";
 
@@ -12,7 +13,7 @@ const FILTER_MODES = ["all", "raw", "memo", "tech", "email_jp", "minutes"] as co
 export function HistoryPage() {
   const items = useHistoryStore((s) => s.items);
   const query = useHistoryStore((s) => s.query);
-  const hasMore = useHistoryStore((s) => s.hasMore);
+  const nextCursor = useHistoryStore((s) => s.nextCursor);
   const loading = useHistoryStore((s) => s.loading);
   const filterMode = useHistoryStore((s) => s.filterMode);
   const fetchHistory = useHistoryStore((s) => s.fetchHistory);
@@ -29,10 +30,10 @@ export function HistoryPage() {
     fetchHistory(query);
   }, [fetchHistory, query]);
 
-  const handleCopyItem = async (text: string) => {
+  const handleCopyItem = async (sessionId: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      addToast("success", "Copied");
+      await navigator.clipboard.writeText(sessionId);
+      addToast("success", "Session ID copied");
     } catch {
       addToast("error", "Failed to copy");
     }
@@ -61,21 +62,12 @@ export function HistoryPage() {
       </div>
 
       {/* Mode filter */}
-      <div className="flex gap-1">
-        {FILTER_MODES.map((mode) => (
-          <button
-            key={mode}
-            onClick={() => setFilterMode(mode)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              filterMode === mode
-                ? "bg-gray-700 text-white"
-                : "text-gray-500 hover:text-gray-300"
-            }`}
-          >
-            {mode === "all" ? "All" : MODE_LABELS[mode as Mode]}
-          </button>
-        ))}
-      </div>
+      <FilterButtonGroup
+        options={FILTER_MODES}
+        selected={filterMode}
+        onChange={setFilterMode}
+        labelFn={(mode) => mode === "all" ? "All" : MODE_LABELS[mode as Mode]}
+      />
 
       {/* History list */}
       <div className="flex-1 space-y-2 overflow-y-auto">
@@ -86,33 +78,36 @@ export function HistoryPage() {
         )}
 
         {filteredItems.map((item) => (
-          <Card key={item.id} className="group">
+          <Card key={item.session_id} className="group">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-sm leading-relaxed text-gray-200">
-                  {item.text}
+                  Session: {item.session_id.slice(0, 8)}...
                 </p>
                 <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
                   <span className="rounded bg-gray-800 px-1.5 py-0.5">
                     {MODE_LABELS[item.mode]}
                   </span>
-                  <span>{(item.confidence * 100).toFixed(0)}%</span>
+                  <span>{item.segment_count} segments</span>
+                  <span className="rounded bg-gray-800 px-1.5 py-0.5">
+                    {item.state}
+                  </span>
                   <span>{new Date(item.created_at).toLocaleString()}</span>
                 </div>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleCopyItem(item.text)}
+                onClick={() => handleCopyItem(item.session_id)}
                 className="shrink-0 opacity-0 group-hover:opacity-100"
               >
-                Copy
+                Copy ID
               </Button>
             </div>
           </Card>
         ))}
 
-        {hasMore && (
+        {nextCursor && (
           <div className="flex justify-center py-2">
             <Button
               variant="ghost"

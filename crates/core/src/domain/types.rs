@@ -11,6 +11,18 @@ pub enum Mode {
     Minutes,
 }
 
+impl std::fmt::Display for Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mode::Raw => write!(f, "raw"),
+            Mode::Memo => write!(f, "memo"),
+            Mode::Tech => write!(f, "tech"),
+            Mode::EmailJp => write!(f, "email_jp"),
+            Mode::Minutes => write!(f, "minutes"),
+        }
+    }
+}
+
 /// 出力ポリシー（Phase1は clipboard のみ）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "snake_case")]

@@ -2,12 +2,12 @@ use async_trait::async_trait;
 
 use super::{AudioSegment, SttContext, SttEngine, SttError, TranscriptResult};
 
-/// NoopSttService: 固定文字列を返すモック実装。
+/// NoopSttEngine: 固定文字列を返すモック実装。
 /// Agent Bが実STTエンジンを実装するまでのスタブ。
-pub struct NoopSttService;
+pub struct NoopSttEngine;
 
 #[async_trait]
-impl SttEngine for NoopSttService {
+impl SttEngine for NoopSttEngine {
     async fn transcribe(
         &self,
         _audio: AudioSegment,
@@ -31,7 +31,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_noop_stt_returns_fixed_text() {
-        let stt = NoopSttService;
+        let stt = NoopSttEngine;
         let result = stt
             .transcribe(
                 AudioSegment {
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_noop_does_not_support_partial() {
-        let stt = NoopSttService;
+        let stt = NoopSttEngine;
         assert!(!stt.supports_partial());
     }
 }

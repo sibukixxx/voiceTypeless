@@ -28,7 +28,7 @@ export function PasteAllowlistPage() {
     addToast("success", `Added ${trimmed}`);
   };
 
-  const isPasteMode = settings.deliver_policy_type === "paste_allowlist";
+  const isPasteMode = settings.default_deliver_target === "paste";
 
   return (
     <div className="h-full space-y-4 overflow-y-auto p-4">
@@ -37,9 +37,9 @@ export function PasteAllowlistPage() {
       {!isPasteMode && (
         <Card className="border-amber-500/30">
           <p className="text-sm text-amber-300">
-            Paste Allowlist is only active when Output Policy is set to "Paste
-            Allowlist". Current policy:{" "}
-            <strong>{settings.deliver_policy_type}</strong>
+            Paste Allowlist is only active when Output Target is set to "Paste
+            to App". Current target:{" "}
+            <strong>{settings.default_deliver_target}</strong>
           </p>
         </Card>
       )}

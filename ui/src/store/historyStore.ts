@@ -5,8 +5,7 @@ import { invokeCommand } from "../lib/coreClient";
 interface HistoryStore {
   items: HistoryItem[];
   query: string;
-  cursor: string | null;
-  hasMore: boolean;
+  nextCursor: string | null;
   loading: boolean;
   filterMode: Mode | "all";
 
@@ -20,8 +19,7 @@ interface HistoryStore {
 export const useHistoryStore = create<HistoryStore>((set, get) => ({
   items: [],
   query: "",
-  cursor: null,
-  hasMore: false,
+  nextCursor: null,
   loading: false,
   filterMode: "all",
 
@@ -36,8 +34,7 @@ export const useHistoryStore = create<HistoryStore>((set, get) => ({
       if (result) {
         set({
           items: result.items,
-          cursor: result.cursor,
-          hasMore: result.has_more,
+          nextCursor: result.next_cursor,
         });
       }
     } finally {
@@ -46,20 +43,19 @@ export const useHistoryStore = create<HistoryStore>((set, get) => ({
   },
 
   loadMore: async () => {
-    const { cursor, query, loading } = get();
-    if (!cursor || loading) return;
+    const { nextCursor, query, loading } = get();
+    if (!nextCursor || loading) return;
     set({ loading: true });
     try {
       const result = await invokeCommand<HistoryPage>("get_history", {
         query: query || undefined,
         limit: 50,
-        cursor,
+        cursor: nextCursor,
       });
       if (result) {
         set((s) => ({
           items: [...s.items, ...result.items],
-          cursor: result.cursor,
-          hasMore: result.has_more,
+          nextCursor: result.next_cursor,
         }));
       }
     } finally {

@@ -169,8 +169,7 @@ describe("historyStore", () => {
     useHistoryStore.setState({
       items: [],
       query: "",
-      cursor: null,
-      hasMore: false,
+      nextCursor: null,
       loading: false,
       filterMode: "all",
     });
@@ -223,8 +222,8 @@ describe("dictionaryStore", () => {
   });
 
   it("setFilterScope updates scope", () => {
-    useDictionaryStore.getState().setFilterScope("app");
-    expect(useDictionaryStore.getState().filterScope).toBe("app");
+    useDictionaryStore.getState().setFilterScope("mode");
+    expect(useDictionaryStore.getState().filterScope).toBe("mode");
   });
 
   it("fetchEntries sets loading (mock mode)", async () => {
@@ -250,12 +249,16 @@ describe("settingsStore", () => {
     useSettingsStore.setState({
       settings: {
         stt_engine: "apple",
-        deliver_policy_type: "clipboard_only",
-        audio_retention: "none",
-        hotkey: "Cmd+Shift+V",
-        paste_allowlist: [],
-        language: "ja-JP",
+        default_mode: "raw",
+        default_deliver_target: "clipboard",
         rewrite_enabled: false,
+        paste_allowlist: [],
+        paste_confirm: true,
+        audio_retention: "none",
+        segment_ttl_days: 0,
+        hotkey_toggle: "CmdOrCtrl+Shift+R",
+        language: "ja-JP",
+        whisper_model_size: "base",
       },
       loading: false,
     });
@@ -264,7 +267,7 @@ describe("settingsStore", () => {
   it("has correct defaults", () => {
     const { settings } = useSettingsStore.getState();
     expect(settings.stt_engine).toBe("apple");
-    expect(settings.deliver_policy_type).toBe("clipboard_only");
+    expect(settings.default_deliver_target).toBe("clipboard");
     expect(settings.audio_retention).toBe("none");
   });
 
@@ -272,8 +275,8 @@ describe("settingsStore", () => {
     useSettingsStore.getState().updateSettings({ stt_engine: "whisper" });
     expect(useSettingsStore.getState().settings.stt_engine).toBe("whisper");
     // Other settings unchanged
-    expect(useSettingsStore.getState().settings.deliver_policy_type).toBe(
-      "clipboard_only",
+    expect(useSettingsStore.getState().settings.default_deliver_target).toBe(
+      "clipboard",
     );
   });
 

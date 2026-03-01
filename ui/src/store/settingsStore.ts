@@ -4,12 +4,16 @@ import { invokeCommand } from "../lib/coreClient";
 
 const DEFAULT_SETTINGS: AppSettings = {
   stt_engine: "soniox",
-  deliver_policy_type: "clipboard_only",
-  audio_retention: "none",
-  hotkey: "Cmd+Shift+V",
-  paste_allowlist: [],
-  language: "ja-JP",
+  default_mode: "raw",
+  default_deliver_target: "clipboard",
   rewrite_enabled: false,
+  paste_allowlist: [],
+  paste_confirm: true,
+  audio_retention: "none",
+  segment_ttl_days: 0,
+  hotkey_toggle: "CmdOrCtrl+Shift+R",
+  language: "ja-JP",
+  whisper_model_size: "base",
 };
 
 interface SettingsStore {
@@ -30,7 +34,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set({ loading: true });
     try {
       const settings = await invokeCommand<AppSettings>("get_settings");
-      set({ settings: { ...DEFAULT_SETTINGS, ...settings } });
+      if (settings) {
+        set({ settings: { ...DEFAULT_SETTINGS, ...settings } });
+      }
     } catch (e) {
       console.error("Failed to load settings:", e);
     } finally {

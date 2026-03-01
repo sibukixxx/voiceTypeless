@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::thread;
 
 use super::capture::{self, AudioCaptureError};
+use super::preprocess::{AudioPreprocessor, PreprocessConfig};
 use super::vad::{VadConfig, VadEvent, VadProcessor};
 use crate::infra::stt::{AudioSegment, SttContext, SttEngine};
 
@@ -43,6 +44,7 @@ impl AudioPipeline {
         event_tx: mpsc::Sender<PipelineEvent>,
         vad_config: VadConfig,
         language: String,
+        dictionary_hints: Vec<String>,
     ) -> Result<Self, AudioCaptureError> {
         // デバイスの事前チェック（高速にエラー検出）
         let _config = capture::check_device()?;
@@ -57,6 +59,7 @@ impl AudioPipeline {
                 event_tx,
                 vad_config,
                 language,
+                dictionary_hints,
             );
         });
 
@@ -84,6 +87,7 @@ impl AudioPipeline {
         event_tx: mpsc::Sender<PipelineEvent>,
         vad_config: VadConfig,
         language: String,
+        dictionary_hints: Vec<String>,
     ) {
         // このスレッド上でキャプチャを開始
         let (sample_tx, sample_rx) = mpsc::channel::<Vec<f32>>();
@@ -147,6 +151,7 @@ impl AudioPipeline {
                                         std::mem::take(&mut segment_buffer),
                                         sample_rate,
                                         &language,
+                                        &dictionary_hints,
                                     );
                                 }
                             }
@@ -172,6 +177,7 @@ impl AudioPipeline {
                 segment_buffer,
                 sample_rate,
                 &language,
+                &dictionary_hints,
             );
         }
     }
@@ -181,17 +187,21 @@ impl AudioPipeline {
         rt: &tokio::runtime::Runtime,
         stt_engine: &Arc<dyn SttEngine>,
         event_tx: &mpsc::Sender<PipelineEvent>,
-        samples: Vec<f32>,
+        mut samples: Vec<f32>,
         sample_rate: u32,
         language: &str,
+        dictionary_hints: &[String],
     ) {
+        // 音声前処理を適用
+        AudioPreprocessor::process(&mut samples, &PreprocessConfig::default());
+
         let audio = AudioSegment {
             samples,
             sample_rate,
         };
         let ctx = SttContext {
             language: language.to_string(),
-            dictionary: vec![],
+            dictionary: dictionary_hints.to_vec(),
         };
 
         match rt.block_on(stt_engine.transcribe(audio, ctx)) {

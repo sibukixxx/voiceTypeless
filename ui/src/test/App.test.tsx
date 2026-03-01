@@ -31,9 +31,11 @@ describe("App", () => {
     });
   });
 
-  it("navigates to SettingsPage", () => {
+  it("navigates to SettingsPage", async () => {
     render(<App />);
     fireEvent.click(screen.getByText("Settings"));
-    expect(screen.getByText("STT Engine")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("STT Engine")).toBeInTheDocument();
+    });
   });
 });

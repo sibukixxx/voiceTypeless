@@ -47,12 +47,18 @@ fn create_stt_engine(storage: &Storage) -> Arc<dyn SttEngine> {
             }
         }
         SttEngineChoice::Whisper => {
-            use vt_core::infra::stt::whisper::WhisperSttEngine;
-            let model_path = WhisperSttEngine::default_model_path();
+            use vt_core::infra::stt::whisper::{WhisperConfig, WhisperSttEngine};
+            let model_path = WhisperSttEngine::model_path_for(settings.whisper_model_size);
             if model_path.exists() {
-                match WhisperSttEngine::new(&model_path.to_string_lossy()) {
+                match WhisperSttEngine::with_config(
+                    &model_path.to_string_lossy(),
+                    WhisperConfig::default(),
+                ) {
                     Ok(engine) => {
-                        log::info!("Whisper STT engine selected");
+                        log::info!(
+                            "Whisper STT engine selected (model: {:?})",
+                            settings.whisper_model_size
+                        );
                         return Arc::new(engine);
                     }
                     Err(e) => {
@@ -80,7 +86,7 @@ fn create_stt_engine(storage: &Storage) -> Arc<dyn SttEngine> {
     }
 
     log::info!("Using Noop STT engine");
-    Arc::new(vt_core::infra::stt::NoopSttService)
+    Arc::new(vt_core::infra::stt::NoopSttEngine)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
