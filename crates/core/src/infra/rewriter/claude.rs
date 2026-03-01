@@ -47,13 +47,10 @@ impl ClaudeRewriter {
 
 #[async_trait]
 impl Rewriter for ClaudeRewriter {
-    async fn rewrite(
-        &self,
-        text: &str,
-        ctx: RewriteContext,
-    ) -> Result<String, RewriteError> {
-        let system_prompt = prompts::system_prompt_for_mode(&ctx.mode)
-            .ok_or_else(|| RewriteError::NotAvailable("Raw mode does not support rewriting".to_string()))?;
+    async fn rewrite(&self, text: &str, ctx: RewriteContext) -> Result<String, RewriteError> {
+        let system_prompt = prompts::system_prompt_for_mode(&ctx.mode).ok_or_else(|| {
+            RewriteError::NotAvailable("Raw mode does not support rewriting".to_string())
+        })?;
 
         let (user_msg, _) = prompts::build_prompt(text, &ctx.dictionary_hints);
 
@@ -105,7 +102,9 @@ impl Rewriter for ClaudeRewriter {
             .join("");
 
         if text.is_empty() {
-            return Err(RewriteError::Failed("Empty response from Claude API".to_string()));
+            return Err(RewriteError::Failed(
+                "Empty response from Claude API".to_string(),
+            ));
         }
 
         Ok(text)

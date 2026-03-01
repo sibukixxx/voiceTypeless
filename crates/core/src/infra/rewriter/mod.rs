@@ -4,8 +4,8 @@ pub mod prompts;
 
 pub use noop::NoopRewriter;
 
-use async_trait::async_trait;
 use crate::domain::types::Mode;
+use async_trait::async_trait;
 
 /// リライトエラー
 #[derive(Debug, thiserror::Error)]
@@ -28,11 +28,7 @@ pub struct RewriteContext {
 /// リライター trait（Agent Bや外部LLMが実装する）
 #[async_trait]
 pub trait Rewriter: Send + Sync {
-    async fn rewrite(
-        &self,
-        text: &str,
-        ctx: RewriteContext,
-    ) -> Result<String, RewriteError>;
+    async fn rewrite(&self, text: &str, ctx: RewriteContext) -> Result<String, RewriteError>;
 
     fn name(&self) -> &str;
 }

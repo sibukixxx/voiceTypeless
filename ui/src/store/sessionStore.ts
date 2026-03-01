@@ -15,7 +15,6 @@ interface SessionStore {
   finalTranscripts: FinalTranscript[];
   currentMode: Mode;
   sessionId: string | null;
-  rewriteEnabled: boolean;
 
   // Actions
   startSession: (mode?: Mode, deliverPolicy?: DeliverPolicy) => Promise<void>;
@@ -25,7 +24,6 @@ interface SessionStore {
   rewriteLast: (mode: Mode) => Promise<void>;
   deliverLast: (target: string) => Promise<void>;
   clearTranscripts: () => void;
-  setRewriteEnabled: (enabled: boolean) => void;
 
   // Event-driven setters (called by eventSetup)
   _setSessionState: (state: SessionState) => void;
@@ -44,7 +42,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   finalTranscripts: [],
   currentMode: "raw",
   sessionId: null,
-  rewriteEnabled: false,
 
   startSession: async (mode, deliverPolicy) => {
     const m = mode ?? get().currentMode;
@@ -79,10 +76,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   clearTranscripts: () => {
     set({ partialTranscript: "", finalTranscripts: [] });
-  },
-
-  setRewriteEnabled: (enabled) => {
-    set({ rewriteEnabled: enabled });
   },
 
   // --- Event-driven setters ---

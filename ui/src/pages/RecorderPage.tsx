@@ -1,4 +1,5 @@
 import { useSessionStore } from "../store/sessionStore";
+import { useSettingsStore } from "../store/settingsStore";
 import { useToastStore } from "../store/toastStore";
 import { isActiveState, isRecording, isBusy } from "../lib/types";
 import { TranscriptView } from "../components/TranscriptView";
@@ -10,8 +11,8 @@ export function RecorderPage() {
   const sessionState = useSessionStore((s) => s.sessionState);
   const finalTranscripts = useSessionStore((s) => s.finalTranscripts);
   const currentMode = useSessionStore((s) => s.currentMode);
-  const rewriteEnabled = useSessionStore((s) => s.rewriteEnabled);
-  const setRewriteEnabled = useSessionStore((s) => s.setRewriteEnabled);
+  const rewriteEnabled = useSettingsStore((s) => s.settings.rewrite_enabled);
+  const updateSettings = useSettingsStore((s) => s.updateSettings);
   const startSession = useSessionStore((s) => s.startSession);
   const stopSession = useSessionStore((s) => s.stopSession);
   const toggleRecording = useSessionStore((s) => s.toggleRecording);
@@ -79,7 +80,19 @@ export function RecorderPage() {
             <input
               type="checkbox"
               checked={rewriteEnabled}
-              onChange={(e) => setRewriteEnabled(e.target.checked)}
+              onChange={async (e) => {
+                try {
+                  await updateSettings({
+                    rewrite_enabled: e.target.checked,
+                  });
+                  addToast(
+                    "success",
+                    `Auto-rewrite ${e.target.checked ? "enabled" : "disabled"}`,
+                  );
+                } catch {
+                  addToast("error", "Failed to save setting");
+                }
+              }}
               disabled={isRawMode}
               className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 accent-purple-500"
             />

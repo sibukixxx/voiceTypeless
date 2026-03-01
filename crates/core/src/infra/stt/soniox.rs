@@ -283,7 +283,9 @@ impl SonioxSttEngine {
     async fn cleanup_transcription(&self, transcription_id: &str) {
         let _ = self
             .client
-            .delete(format!("{SONIOX_API_BASE}/transcriptions/{transcription_id}"))
+            .delete(format!(
+                "{SONIOX_API_BASE}/transcriptions/{transcription_id}"
+            ))
             .bearer_auth(&self.api_key)
             .send()
             .await;

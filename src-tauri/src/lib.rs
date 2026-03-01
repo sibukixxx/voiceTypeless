@@ -19,7 +19,9 @@ fn create_rewriter(storage: &Storage) -> Arc<dyn Rewriter> {
 
     if !api_key.is_empty() {
         log::info!("Claude rewriter selected (API key configured)");
-        Arc::new(vt_core::infra::rewriter::claude::ClaudeRewriter::new(api_key))
+        Arc::new(vt_core::infra::rewriter::claude::ClaudeRewriter::new(
+            api_key,
+        ))
     } else {
         log::info!("Using Noop rewriter (no API key)");
         Arc::new(vt_core::infra::rewriter::NoopRewriter)
@@ -103,9 +105,7 @@ pub fn run() {
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("voiceTypeless");
         std::fs::create_dir_all(&dir).ok();
-        dir.join("voicetypeless.db")
-            .to_string_lossy()
-            .to_string()
+        dir.join("voicetypeless.db").to_string_lossy().to_string()
     });
 
     let storage = Storage::open(&db_path).expect("SQLite の初期化に失敗しました");
@@ -133,6 +133,7 @@ pub fn run() {
             commands::get_metrics,
             commands::cleanup_data,
             commands::paste_to_active_app,
+            commands::open_system_settings,
             commands::check_whisper_model,
             commands::download_whisper_model,
         ])

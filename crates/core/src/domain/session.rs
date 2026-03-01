@@ -280,9 +280,7 @@ impl SessionManager {
                     new_state: session.state.clone(),
                 })
             }
-            SessionState::Error { .. } => {
-                Err(AppError::invalid_state("回復不可能なエラーです"))
-            }
+            SessionState::Error { .. } => Err(AppError::invalid_state("回復不可能なエラーです")),
             other => Err(AppError::invalid_state(format!(
                 "recover_from_error は {} 状態では実行できません",
                 other.as_str()

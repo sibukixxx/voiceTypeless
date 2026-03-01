@@ -87,10 +87,7 @@ mod tests {
         let mut samples = vec![0.1, -0.2, 0.15, -0.05];
         AudioPreprocessor::normalize_gain(&mut samples, 0.9);
         let peak = samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
-        assert!(
-            (peak - 0.9).abs() < 0.01,
-            "Peak should be ~0.9, got {peak}"
-        );
+        assert!((peak - 0.9).abs() < 0.01, "Peak should be ~0.9, got {peak}");
     }
 
     #[test]

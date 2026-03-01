@@ -103,8 +103,7 @@ fn resample_to_16k(samples: &[f32], source_rate: u32) -> Vec<f32> {
     }
 
     use rubato::{
-        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
-        WindowFunction,
+        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
     };
 
     let params = SincInterpolationParameters {
@@ -227,9 +226,9 @@ impl SttEngine for WhisperSttEngine {
             .full(params, &samples_16k)
             .map_err(|e| SttError::TranscriptionFailed(format!("Whisper inference failed: {e}")))?;
 
-        let num_segments = state.full_n_segments().map_err(|e| {
-            SttError::TranscriptionFailed(format!("Failed to get segments: {e}"))
-        })?;
+        let num_segments = state
+            .full_n_segments()
+            .map_err(|e| SttError::TranscriptionFailed(format!("Failed to get segments: {e}")))?;
 
         let mut text = String::new();
         for i in 0..num_segments {
@@ -269,11 +268,7 @@ mod tests {
         let result = resample_to_16k(&samples, 48000);
         // sinc 補間リサンプラーは厳密に 16000 にならない場合がある（±1%許容）
         let diff = (result.len() as i64 - 16000).unsigned_abs();
-        assert!(
-            diff < 160,
-            "Expected ~16000 samples, got {}",
-            result.len()
-        );
+        assert!(diff < 160, "Expected ~16000 samples, got {}", result.len());
     }
 
     #[test]
@@ -284,26 +279,18 @@ mod tests {
 
     #[test]
     fn test_model_path_for_sizes() {
-        assert!(
-            WhisperSttEngine::model_path_for(WhisperModelSize::Base)
-                .to_string_lossy()
-                .contains("ggml-base.bin")
-        );
-        assert!(
-            WhisperSttEngine::model_path_for(WhisperModelSize::Small)
-                .to_string_lossy()
-                .contains("ggml-small.bin")
-        );
-        assert!(
-            WhisperSttEngine::model_path_for(WhisperModelSize::Medium)
-                .to_string_lossy()
-                .contains("ggml-medium.bin")
-        );
-        assert!(
-            WhisperSttEngine::model_path_for(WhisperModelSize::Large)
-                .to_string_lossy()
-                .contains("ggml-large-v3.bin")
-        );
+        assert!(WhisperSttEngine::model_path_for(WhisperModelSize::Base)
+            .to_string_lossy()
+            .contains("ggml-base.bin"));
+        assert!(WhisperSttEngine::model_path_for(WhisperModelSize::Small)
+            .to_string_lossy()
+            .contains("ggml-small.bin"));
+        assert!(WhisperSttEngine::model_path_for(WhisperModelSize::Medium)
+            .to_string_lossy()
+            .contains("ggml-medium.bin"));
+        assert!(WhisperSttEngine::model_path_for(WhisperModelSize::Large)
+            .to_string_lossy()
+            .contains("ggml-large-v3.bin"));
     }
 
     #[test]

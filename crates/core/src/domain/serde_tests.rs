@@ -21,10 +21,7 @@ mod tests {
 
     #[test]
     fn test_mode_deserialization() {
-        assert_eq!(
-            serde_json::from_str::<Mode>("\"raw\"").unwrap(),
-            Mode::Raw
-        );
+        assert_eq!(serde_json::from_str::<Mode>("\"raw\"").unwrap(), Mode::Raw);
         assert_eq!(
             serde_json::from_str::<Mode>("\"email_jp\"").unwrap(),
             Mode::EmailJp

@@ -1,5 +1,5 @@
-use crate::domain::error::AppError;
 use super::OutputTarget;
+use crate::domain::error::AppError;
 
 /// クリップボード出力
 pub struct ClipboardOutput {

@@ -12,11 +12,7 @@ pub const DELIVER_DONE: &str = "deliver_done";
 pub const ERROR: &str = "error";
 
 /// 統一イベント送信関数
-pub fn emit_event<S: Serialize + Clone>(
-    app: &AppHandle,
-    event_name: &str,
-    payload: S,
-) {
+pub fn emit_event<S: Serialize + Clone>(app: &AppHandle, event_name: &str, payload: S) {
     if let Err(e) = app.emit(event_name, payload) {
         log::error!("イベント送信失敗 [{event_name}]: {e}");
     }
