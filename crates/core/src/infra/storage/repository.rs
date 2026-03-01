@@ -984,4 +984,78 @@ mod tests {
         assert_eq!(entries[1].id.as_deref(), Some("mid"));
         assert_eq!(entries[2].id.as_deref(), Some("low"));
     }
+
+    // --- History search tests (additional) ---
+
+    #[test]
+    fn list_history_returns_all_sessions_when_query_is_none() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .insert_session("s1", Mode::Raw, "2025-01-15T10:00:00Z")
+            .unwrap();
+        storage
+            .insert_session("s2", Mode::Raw, "2025-01-15T11:00:00Z")
+            .unwrap();
+
+        let page = storage.list_history(10, None, None).unwrap();
+        assert_eq!(page.items.len(), 2);
+    }
+
+    #[test]
+    fn list_history_filters_by_raw_text_when_query_provided() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .insert_session("s1", Mode::Raw, "2025-01-15T10:00:00Z")
+            .unwrap();
+        storage
+            .insert_session("s2", Mode::Raw, "2025-01-15T11:00:00Z")
+            .unwrap();
+
+        storage
+            .insert_segment("seg1", "s1", "2025-01-15T10:01:00Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg1", "Rustのテスト", 0.9)
+            .unwrap();
+
+        storage
+            .insert_segment("seg2", "s2", "2025-01-15T11:01:00Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg2", "Pythonのコード", 0.8)
+            .unwrap();
+
+        let page = storage.list_history(10, None, Some("Rust")).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].session_id, "s1");
+    }
+
+    #[test]
+    fn list_history_filters_by_rewritten_text_when_query_provided() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .insert_session("s1", Mode::Memo, "2025-01-15T10:00:00Z")
+            .unwrap();
+        storage
+            .insert_segment("seg1", "s1", "2025-01-15T10:01:00Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg1", "元のテキスト", 0.9)
+            .unwrap();
+        storage
+            .update_segment_rewritten("seg1", "リライト済みテキスト")
+            .unwrap();
+
+        // raw_text にはマッチしないが rewritten_text にマッチ
+        let page = storage.list_history(10, None, Some("リライト")).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].session_id, "s1");
+
+        // マッチしないクエリ
+        let page = storage
+            .list_history(10, None, Some("存在しない"))
+            .unwrap();
+        assert_eq!(page.items.len(), 0);
+    }
+
 }

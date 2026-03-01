@@ -463,4 +463,46 @@ mod tests {
         mgr.set_mode(Mode::Tech).unwrap();
         assert_eq!(mgr.active().unwrap().mode, Mode::Tech);
     }
+
+    #[test]
+    fn test_start_session_with_paste_policy() {
+        let mut mgr = SessionManager::new();
+        mgr.start_session(
+            "paste-session".to_string(),
+            Mode::Raw,
+            DeliverPolicy::Paste,
+            now(),
+        )
+        .unwrap();
+        let session = mgr.active().unwrap();
+        assert!(matches!(session.deliver_policy, DeliverPolicy::Paste));
+    }
+
+    #[test]
+    fn test_start_session_with_file_append_policy() {
+        let mut mgr = SessionManager::new();
+        mgr.start_session(
+            "file-session".to_string(),
+            Mode::Memo,
+            DeliverPolicy::FileAppend,
+            now(),
+        )
+        .unwrap();
+        let session = mgr.active().unwrap();
+        assert!(matches!(session.deliver_policy, DeliverPolicy::FileAppend));
+    }
+
+    #[test]
+    fn test_start_session_with_webhook_policy() {
+        let mut mgr = SessionManager::new();
+        mgr.start_session(
+            "webhook-session".to_string(),
+            Mode::Tech,
+            DeliverPolicy::Webhook,
+            now(),
+        )
+        .unwrap();
+        let session = mgr.active().unwrap();
+        assert!(matches!(session.deliver_policy, DeliverPolicy::Webhook));
+    }
 }

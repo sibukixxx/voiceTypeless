@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::domain::error::AppError;
 use crate::domain::session::{SessionManager, SessionState, StateTransition};
 use crate::domain::settings::AppSettings;
-use crate::domain::types::{DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail};
+use crate::domain::types::{DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail};
 use crate::infra::audio::pipeline::{AudioPipeline, PipelineEvent};
 use crate::infra::audio::vad::VadConfig;
 use crate::infra::metrics::{Metrics, MetricsSummary};
@@ -42,6 +42,9 @@ impl AppService {
 
         let resolved = match session.deliver_policy {
             DeliverPolicy::Clipboard => DeliverTarget::Clipboard,
+            DeliverPolicy::Paste => DeliverTarget::Paste,
+            DeliverPolicy::FileAppend => DeliverTarget::FileAppend,
+            DeliverPolicy::Webhook => DeliverTarget::Webhook,
         };
         Ok(resolved)
     }

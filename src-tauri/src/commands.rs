@@ -303,7 +303,7 @@ pub async fn rewrite_last(
 
 #[tauri::command]
 pub fn deliver_last(app: AppHandle, service: State<'_, AppService>) -> CmdResult<()> {
-    let (transition, _text) = service.deliver_last()?;
+    let (transition, _text, delivered_target) = service.deliver_last(None)?;
 
     events::emit_event(
         &app,

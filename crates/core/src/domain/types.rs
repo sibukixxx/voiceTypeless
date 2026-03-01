@@ -23,11 +23,14 @@ impl std::fmt::Display for Mode {
     }
 }
 
-/// 出力ポリシー（Phase1は clipboard のみ）
+/// 出力ポリシー
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "snake_case")]
 pub enum DeliverPolicy {
     Clipboard,
+    Paste,
+    FileAppend,
+    Webhook,
 }
 
 /// 配信先ターゲット
