@@ -7,7 +7,7 @@ use vt_core::domain::error::ErrorCode;
 use vt_core::domain::session::{SessionState, StateTransition};
 use vt_core::domain::settings::AppSettings;
 use vt_core::domain::types::{
-    DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
+    DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail,
 };
 use vt_core::infra::audio::pipeline::PipelineEvent;
 use vt_core::infra::metrics::MetricsSummary;
@@ -15,10 +15,9 @@ use vt_core::infra::os_integration::{PasteResult, PermissionStatus};
 use vt_core::usecase::app_service::AppService;
 
 use crate::events::{
-    self, AudioLevelPayload, ErrorPayload, SessionStateChangedPayload,
-    TranscriptFinalPayload, TranscriptPartialPayload,
-    AUDIO_LEVEL, DELIVER_DONE, ERROR, REWRITE_DONE, SESSION_STATE_CHANGED,
-    TRANSCRIPT_FINAL, TRANSCRIPT_PARTIAL,
+    self, AudioLevelPayload, ErrorPayload, SessionStateChangedPayload, TranscriptFinalPayload,
+    TranscriptPartialPayload, AUDIO_LEVEL, DELIVER_DONE, ERROR, REWRITE_DONE,
+    SESSION_STATE_CHANGED, TRANSCRIPT_FINAL, TRANSCRIPT_PARTIAL,
 };
 
 /// コマンドエラー型（Tauri の Result で使用）
@@ -71,10 +70,7 @@ pub fn start_session(
 }
 
 #[tauri::command]
-pub fn stop_session(
-    app: AppHandle,
-    service: State<'_, AppService>,
-) -> CmdResult<()> {
+pub fn stop_session(app: AppHandle, service: State<'_, AppService>) -> CmdResult<()> {
     let transition = service.stop_session()?;
 
     if let Some(t) = transition {
@@ -85,10 +81,7 @@ pub fn stop_session(
 }
 
 #[tauri::command]
-pub fn toggle_recording(
-    app: AppHandle,
-    service: State<'_, AppService>,
-) -> CmdResult<()> {
+pub fn toggle_recording(app: AppHandle, service: State<'_, AppService>) -> CmdResult<()> {
     let current_state = service.current_state();
 
     if current_state.as_deref() == Some("recording") {
@@ -140,11 +133,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                     events::emit_event(&app, AUDIO_LEVEL, AudioLevelPayload { rms });
                 }
                 PipelineEvent::TranscriptPartial { text } => {
-                    events::emit_event(
-                        &app,
-                        TRANSCRIPT_PARTIAL,
-                        TranscriptPartialPayload { text },
-                    );
+                    events::emit_event(&app, TRANSCRIPT_PARTIAL, TranscriptPartialPayload { text });
                 }
                 PipelineEvent::TranscriptFinal { text, confidence } => {
                     let service = app.state::<AppService>();
@@ -164,9 +153,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                             let should_rewrite = {
                                 let settings = service.get_settings().ok();
                                 let mode = service.current_mode();
-                                settings
-                                    .map(|s| s.rewrite_enabled)
-                                    .unwrap_or(false)
+                                settings.map(|s| s.rewrite_enabled).unwrap_or(false)
                                     && mode.map(|m| m != Mode::Raw).unwrap_or(false)
                             };
 
@@ -175,8 +162,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                                 let text_for_rewrite = processed_text;
                                 let seg_id = segment_id;
                                 let mode = service.current_mode().unwrap_or(Mode::Raw);
-                                let session_id =
-                                    service.current_session_id().unwrap_or_default();
+                                let session_id = service.current_session_id().unwrap_or_default();
 
                                 // 非同期でリライト実行（パイプラインをブロックしない）
                                 std::thread::spawn(move || {
@@ -185,12 +171,10 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                                         .build();
                                     if let Ok(rt) = rt {
                                         let svc = app_clone.state::<AppService>();
-                                        match rt.block_on(
-                                            svc.rewrite_text(&text_for_rewrite, mode),
-                                        ) {
+                                        match rt.block_on(svc.rewrite_text(&text_for_rewrite, mode))
+                                        {
                                             Ok(rewritten) => {
-                                                let _ =
-                                                    svc.on_rewrite_done(&seg_id, &rewritten);
+                                                let _ = svc.on_rewrite_done(&seg_id, &rewritten);
                                                 events::emit_event(
                                                     &app_clone,
                                                     REWRITE_DONE,
@@ -203,10 +187,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
                                                 );
                                             }
                                             Err(e) => {
-                                                log::error!(
-                                                    "Auto-rewrite failed: {}",
-                                                    e
-                                                );
+                                                log::error!("Auto-rewrite failed: {}", e);
                                                 events::emit_event(
                                                     &app_clone,
                                                     ERROR,
@@ -247,10 +228,7 @@ fn spawn_event_forwarder(app: AppHandle, event_rx: mpsc::Receiver<PipelineEvent>
 }
 
 #[tauri::command]
-pub fn set_mode(
-    service: State<'_, AppService>,
-    mode: Mode,
-) -> CmdResult<()> {
+pub fn set_mode(service: State<'_, AppService>, mode: Mode) -> CmdResult<()> {
     service.set_mode(mode)?;
     Ok(())
 }
@@ -266,10 +244,7 @@ pub struct GetHistoryArgs {
 }
 
 #[tauri::command]
-pub fn get_history(
-    service: State<'_, AppService>,
-    args: GetHistoryArgs,
-) -> CmdResult<HistoryPage> {
+pub fn get_history(service: State<'_, AppService>, args: GetHistoryArgs) -> CmdResult<HistoryPage> {
     let _ = args.query;
     let page = service.get_history(args.limit, args.cursor.as_deref())?;
     Ok(page)
@@ -333,15 +308,16 @@ pub async fn rewrite_last(
 pub fn deliver_last(
     app: AppHandle,
     service: State<'_, AppService>,
+    target: Option<DeliverTarget>,
 ) -> CmdResult<()> {
-    let (transition, _text) = service.deliver_last()?;
+    let (transition, _text, delivered_target) = service.deliver_last(target)?;
 
     events::emit_event(
         &app,
         DELIVER_DONE,
         events::DeliverDonePayload {
             session_id: transition.session_id.clone(),
-            target: "clipboard".to_string(),
+            target: delivered_target.as_str().to_string(),
         },
     );
 
@@ -353,50 +329,35 @@ pub fn deliver_last(
 // --- Phase 3 Commands ---
 
 #[tauri::command]
-pub fn get_settings(
-    service: State<'_, AppService>,
-) -> CmdResult<AppSettings> {
+pub fn get_settings(service: State<'_, AppService>) -> CmdResult<AppSettings> {
     let settings = service.get_settings()?;
     Ok(settings)
 }
 
 #[tauri::command]
-pub fn update_settings(
-    service: State<'_, AppService>,
-    settings: AppSettings,
-) -> CmdResult<()> {
+pub fn update_settings(service: State<'_, AppService>, settings: AppSettings) -> CmdResult<()> {
     service.update_settings(settings)?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn check_permissions(
-    service: State<'_, AppService>,
-) -> CmdResult<PermissionStatus> {
+pub fn check_permissions(service: State<'_, AppService>) -> CmdResult<PermissionStatus> {
     Ok(service.check_permissions())
 }
 
 #[tauri::command]
-pub fn get_metrics(
-    service: State<'_, AppService>,
-) -> CmdResult<MetricsSummary> {
+pub fn get_metrics(service: State<'_, AppService>) -> CmdResult<MetricsSummary> {
     Ok(service.get_metrics())
 }
 
 #[tauri::command]
-pub fn cleanup_data(
-    service: State<'_, AppService>,
-    ttl_days: u32,
-) -> CmdResult<(u32, u32)> {
+pub fn cleanup_data(service: State<'_, AppService>, ttl_days: u32) -> CmdResult<(u32, u32)> {
     let result = service.cleanup_old_data(ttl_days)?;
     Ok(result)
 }
 
 #[tauri::command]
-pub fn paste_to_active_app(
-    service: State<'_, AppService>,
-    text: String,
-) -> CmdResult<PasteResult> {
+pub fn paste_to_active_app(service: State<'_, AppService>, text: String) -> CmdResult<PasteResult> {
     let result = service.paste_to_active_app(&text)?;
     Ok(result)
 }
@@ -431,18 +392,14 @@ pub async fn download_whisper_model(model_size: Option<String>) -> CmdResult<Str
     // モデルディレクトリ作成
     if let Some(parent) = model_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            vt_core::domain::error::AppError::internal(format!(
-                "モデルディレクトリ作成失敗: {e}"
-            ))
+            vt_core::domain::error::AppError::internal(format!("モデルディレクトリ作成失敗: {e}"))
         })?;
     }
 
     let url = size.download_url();
 
     let response = reqwest::get(&url).await.map_err(|e| {
-        vt_core::domain::error::AppError::internal(format!(
-            "モデルダウンロード失敗: {e}"
-        ))
+        vt_core::domain::error::AppError::internal(format!("モデルダウンロード失敗: {e}"))
     })?;
 
     if !response.status().is_success() {
@@ -454,15 +411,11 @@ pub async fn download_whisper_model(model_size: Option<String>) -> CmdResult<Str
     }
 
     let bytes = response.bytes().await.map_err(|e| {
-        vt_core::domain::error::AppError::internal(format!(
-            "モデルデータ受信失敗: {e}"
-        ))
+        vt_core::domain::error::AppError::internal(format!("モデルデータ受信失敗: {e}"))
     })?;
 
     std::fs::write(&model_path, &bytes).map_err(|e| {
-        vt_core::domain::error::AppError::internal(format!(
-            "モデルファイル保存失敗: {e}"
-        ))
+        vt_core::domain::error::AppError::internal(format!("モデルファイル保存失敗: {e}"))
     })?;
 
     Ok(model_path.to_string_lossy().to_string())
