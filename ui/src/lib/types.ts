@@ -182,6 +182,22 @@ export interface PermissionStatus {
   accessibility: PermissionState;
 }
 
+// === Setup Status ===
+export interface SetupIssue {
+  category: string; // "stt" | "rewriter" | "delivery" | "permission"
+  severity: string; // "error" | "warning"
+  message: string;
+  action: string;
+  navigate_to: string | null;
+}
+
+export interface SetupStatus {
+  ready: boolean;
+  issues: SetupIssue[];
+  active_stt_engine: string;
+  active_rewriter: string;
+}
+
 // === Metrics ===
 // MetricsSummary は MetricsPage 内でローカル定義（Rust MetricsSummary 互換）
 
