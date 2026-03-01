@@ -72,16 +72,21 @@ fn create_stt_engine(storage: &Storage) -> Arc<dyn SttEngine> {
                 );
             }
         }
-        SttEngineChoice::Cloud => {
-            log::warn!("Cloud STT not yet implemented, falling back to Noop STT");
-        }
-        SttEngineChoice::Soniox => {
+        SttEngineChoice::Cloud | SttEngineChoice::Soniox => {
             let api_key = settings.soniox_api_key.unwrap_or_default();
             if !api_key.is_empty() {
-                log::info!("Soniox STT engine selected");
+                if matches!(settings.stt_engine, SttEngineChoice::Cloud) {
+                    log::info!("Cloud STT selected; using Soniox backend");
+                } else {
+                    log::info!("Soniox STT engine selected");
+                }
                 return Arc::new(vt_core::infra::stt::soniox::SonioxSttEngine::new(api_key));
             }
-            log::warn!("Soniox API key not configured, falling back to Noop STT");
+            if matches!(settings.stt_engine, SttEngineChoice::Cloud) {
+                log::warn!("Cloud STT selected but soniox_api_key is not configured, falling back to Noop STT");
+            } else {
+                log::warn!("Soniox API key not configured, falling back to Noop STT");
+            }
         }
     }
 
