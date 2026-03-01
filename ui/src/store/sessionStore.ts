@@ -6,6 +6,7 @@ import type {
   FinalTranscript,
 } from "../lib/types";
 import { invokeCommand } from "../lib/coreClient";
+import { useSettingsStore } from "./settingsStore";
 
 interface SessionStore {
   // State
@@ -83,6 +84,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   setRewriteEnabled: (enabled) => {
     set({ rewriteEnabled: enabled });
+    // バックエンド設定に同期（自動リライト判定は service.get_settings().rewrite_enabled を参照するため）
+    invokeCommand("update_settings", {
+      settings: { ...useSettingsStore.getState().settings, rewrite_enabled: enabled },
+    }).catch((e) => console.error("Failed to sync rewrite_enabled:", e));
   },
 
   // --- Event-driven setters ---
