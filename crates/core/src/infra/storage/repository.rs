@@ -319,7 +319,10 @@ impl Storage {
                 .conn
                 .prepare(
                     "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
-                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
                      FROM sessions s
                      WHERE s.created_at < ?1
                      ORDER BY s.created_at DESC
@@ -335,6 +338,7 @@ impl Storage {
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
                         segment_count: row.get(5)?,
+                        preview_text: row.get(6)?,
                     })
                 })
                 .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
@@ -345,7 +349,10 @@ impl Storage {
                 .conn
                 .prepare(
                     "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
-                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
                      FROM sessions s
                      ORDER BY s.created_at DESC
                      LIMIT ?1",
@@ -360,6 +367,93 @@ impl Storage {
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
                         segment_count: row.get(5)?,
+                        preview_text: row.get(6)?,
+                    })
+                })
+                .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+        }
+
+        let has_next = rows.len() > limit as usize;
+        let items: Vec<SessionSummary> = rows.into_iter().take(limit as usize).collect();
+        let next_cursor = if has_next {
+            items.last().map(|s| s.created_at.clone())
+        } else {
+            None
+        };
+
+        Ok(HistoryPage { items, next_cursor })
+    }
+
+    pub fn search_history(
+        &self,
+        query: &str,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<HistoryPage, AppError> {
+        let pattern = format!("%{query}%");
+        let mut stmt;
+        let rows: Vec<SessionSummary>;
+
+        if let Some(cursor_ts) = cursor {
+            stmt = self
+                .conn
+                .prepare(
+                    "SELECT DISTINCT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
+                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
+                     FROM sessions s
+                     INNER JOIN segments seg3 ON seg3.session_id = s.session_id
+                     WHERE s.created_at < ?1
+                       AND (seg3.raw_text LIKE ?2 OR seg3.rewritten_text LIKE ?2)
+                     ORDER BY s.created_at DESC
+                     LIMIT ?3",
+                )
+                .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+            rows = stmt
+                .query_map(params![cursor_ts, pattern, limit + 1], |row| {
+                    Ok(SessionSummary {
+                        session_id: row.get(0)?,
+                        state: row.get(1)?,
+                        mode: parse_mode(row.get::<_, String>(2)?.as_str()),
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        segment_count: row.get(5)?,
+                        preview_text: row.get(6)?,
+                    })
+                })
+                .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::storage(format!("行読み取り失敗: {e}")))?;
+        } else {
+            stmt = self
+                .conn
+                .prepare(
+                    "SELECT DISTINCT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
+                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
+                     FROM sessions s
+                     INNER JOIN segments seg3 ON seg3.session_id = s.session_id
+                     WHERE seg3.raw_text LIKE ?1 OR seg3.rewritten_text LIKE ?1
+                     ORDER BY s.created_at DESC
+                     LIMIT ?2",
+                )
+                .map_err(|e| AppError::storage(format!("クエリ準備失敗: {e}")))?;
+            rows = stmt
+                .query_map(params![pattern, limit + 1], |row| {
+                    Ok(SessionSummary {
+                        session_id: row.get(0)?,
+                        state: row.get(1)?,
+                        mode: parse_mode(row.get::<_, String>(2)?.as_str()),
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        segment_count: row.get(5)?,
+                        preview_text: row.get(6)?,
                     })
                 })
                 .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
@@ -640,6 +734,96 @@ mod tests {
 
         let page = storage.list_history(10, None).unwrap();
         assert_eq!(page.items[0].segment_count, 2);
+    }
+
+    #[test]
+    fn list_history_returns_preview_text_when_segment_exists() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
+        storage
+            .update_segment_text("seg1", "hello world", 0.9)
+            .unwrap();
+
+        let page = storage.list_history(10, None).unwrap();
+        assert_eq!(page.items[0].preview_text.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn list_history_returns_rewritten_text_as_preview_when_available() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
+        storage
+            .update_segment_text("seg1", "raw text", 0.9)
+            .unwrap();
+        storage
+            .update_segment_rewritten("seg1", "rewritten text")
+            .unwrap();
+
+        let page = storage.list_history(10, None).unwrap();
+        assert_eq!(
+            page.items[0].preview_text.as_deref(),
+            Some("rewritten text")
+        );
+    }
+
+    #[test]
+    fn search_history_returns_matching_sessions_by_raw_text() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage
+            .insert_session("s1", Mode::Raw, "2025-01-15T10:30:00Z")
+            .unwrap();
+        storage
+            .insert_segment("seg1", "s1", "2025-01-15T10:30:00Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg1", "hello world", 0.9)
+            .unwrap();
+
+        storage
+            .insert_session("s2", Mode::Raw, "2025-01-15T10:31:00Z")
+            .unwrap();
+        storage
+            .insert_segment("seg2", "s2", "2025-01-15T10:31:00Z")
+            .unwrap();
+        storage
+            .update_segment_text("seg2", "goodbye", 0.9)
+            .unwrap();
+
+        let page = storage.search_history("hello", 10, None).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].session_id, "s1");
+    }
+
+    #[test]
+    fn search_history_searches_rewritten_text() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
+        storage
+            .update_segment_text("seg1", "raw text", 0.9)
+            .unwrap();
+        storage
+            .update_segment_rewritten("seg1", "polished output")
+            .unwrap();
+
+        let page = storage.search_history("polished", 10, None).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].session_id, "s1");
+    }
+
+    #[test]
+    fn search_history_returns_empty_for_no_match() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
+        storage
+            .update_segment_text("seg1", "hello world", 0.9)
+            .unwrap();
+
+        let page = storage.search_history("nonexistent", 10, None).unwrap();
+        assert!(page.items.is_empty());
     }
 
     #[test]

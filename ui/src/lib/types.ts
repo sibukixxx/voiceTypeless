@@ -119,6 +119,7 @@ export interface HistoryItem {
   created_at: string;
   updated_at: string;
   segment_count: number;
+  preview_text?: string;
 }
 
 // Rust HistoryPage 互換
@@ -187,7 +188,8 @@ export type Page =
   | "settings"
   | "permissions"
   | "metrics"
-  | "paste_allowlist";
+  | "paste_allowlist"
+  | "diagnostics";
 
 // === Transcript (UI internal) ===
 export interface FinalTranscript {

@@ -476,9 +476,17 @@ impl AppService {
 
     // ==================== Queries ====================
 
-    pub fn get_history(&self, limit: u32, cursor: Option<&str>) -> Result<HistoryPage, AppError> {
+    pub fn get_history(
+        &self,
+        query: Option<&str>,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<HistoryPage, AppError> {
         let storage = self.storage.lock().unwrap();
-        storage.list_history(limit, cursor)
+        match query {
+            Some(q) if !q.is_empty() => storage.search_history(q, limit, cursor),
+            _ => storage.list_history(limit, cursor),
+        }
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionDetail>, AppError> {

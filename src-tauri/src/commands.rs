@@ -245,8 +245,7 @@ pub struct GetHistoryArgs {
 
 #[tauri::command]
 pub fn get_history(service: State<'_, AppService>, args: GetHistoryArgs) -> CmdResult<HistoryPage> {
-    let _ = args.query;
-    let page = service.get_history(args.limit, args.cursor.as_deref())?;
+    let page = service.get_history(args.query.as_deref(), args.limit, args.cursor.as_deref())?;
     Ok(page)
 }
 
