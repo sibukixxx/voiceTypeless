@@ -362,6 +362,27 @@ pub fn paste_to_active_app(service: State<'_, AppService>, text: String) -> CmdR
     Ok(result)
 }
 
+#[tauri::command]
+pub fn open_system_settings(target: String) -> CmdResult<()> {
+    let url = vt_core::infra::os_integration::system_settings_url(&target).ok_or_else(|| {
+        vt_core::domain::error::AppError::internal(format!("Unknown settings target: {target}"))
+    })?;
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| {
+                vt_core::domain::error::AppError::internal(format!(
+                    "Failed to open system settings: {e}"
+                ))
+            })?;
+    }
+
+    Ok(())
+}
+
 // --- Phase 4 Commands: Whisper ---
 
 fn parse_model_size(s: Option<String>) -> vt_core::domain::settings::WhisperModelSize {

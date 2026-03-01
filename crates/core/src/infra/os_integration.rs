@@ -184,6 +184,19 @@ impl OsIntegration {
     }
 }
 
+/// macOS システム設定の深層リンクURLを返す
+pub fn system_settings_url(target: &str) -> Option<&'static str> {
+    match target {
+        "microphone" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+        "accessibility" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        }
+        _ => None,
+    }
+}
+
 /// ペーストルーター: allowlist ベースのペースト制御
 pub struct PasteRouter;
 
@@ -265,6 +278,29 @@ mod tests {
             PasteResult::FallbackClipboard { .. } => {}
             _ => panic!("空のallowlistではFallbackClipboardになるべき"),
         }
+    }
+
+    #[test]
+    fn system_settings_url_returns_microphone_url() {
+        let url = system_settings_url("microphone");
+        assert_eq!(
+            url,
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        );
+    }
+
+    #[test]
+    fn system_settings_url_returns_accessibility_url() {
+        let url = system_settings_url("accessibility");
+        assert_eq!(
+            url,
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        );
+    }
+
+    #[test]
+    fn system_settings_url_returns_none_for_unknown_target() {
+        assert_eq!(system_settings_url("unknown"), None);
     }
 
     #[test]

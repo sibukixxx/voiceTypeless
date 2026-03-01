@@ -296,20 +296,28 @@ describe("PermissionsPage", () => {
     expect(screen.getByText("Accessibility")).toBeInTheDocument();
   });
 
-  it("shows Not granted by default", () => {
+  it("shows Not determined as default state", () => {
     render(<PermissionsPage />);
-    const notGranted = screen.getAllByText("Not granted");
-    expect(notGranted).toHaveLength(2);
+    const notDetermined = screen.getAllByText("Not determined");
+    expect(notDetermined).toHaveLength(2);
   });
 
-  it("renders Check Permissions button", () => {
+  it("renders Check Permissions button", async () => {
     render(<PermissionsPage />);
-    expect(screen.getByText("Check Permissions")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Check Permissions")).toBeInTheDocument();
+    });
   });
 
-  it("shows how-to-enable instructions", () => {
+  it("shows how-to-enable instructions for non-granted states", () => {
     render(<PermissionsPage />);
     expect(screen.getAllByText("How to enable:")).toHaveLength(2);
+  });
+
+  it("renders Open System Settings buttons for non-granted states", () => {
+    render(<PermissionsPage />);
+    const buttons = screen.getAllByText("Open System Settings");
+    expect(buttons).toHaveLength(2);
   });
 });
 

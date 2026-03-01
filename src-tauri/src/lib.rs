@@ -133,6 +133,7 @@ pub fn run() {
             commands::get_metrics,
             commands::cleanup_data,
             commands::paste_to_active_app,
+            commands::open_system_settings,
             commands::check_whisper_model,
             commands::download_whisper_model,
         ])

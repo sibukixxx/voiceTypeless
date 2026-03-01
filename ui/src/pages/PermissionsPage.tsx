@@ -1,14 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { useToastStore } from "../store/toastStore";
 import { invokeCommand } from "../lib/coreClient";
-import type { PermissionStatus } from "../lib/types";
+import type { PermissionState, PermissionStatus } from "../lib/types";
+
+function permissionDisplay(state: PermissionState) {
+  switch (state) {
+    case "granted":
+      return { label: "Granted", color: "bg-green-500" };
+    case "denied":
+      return { label: "Denied", color: "bg-red-500" };
+    case "not_determined":
+      return { label: "Not determined", color: "bg-yellow-500" };
+    case "unavailable":
+      return { label: "Unavailable", color: "bg-gray-500" };
+  }
+}
+
+function needsAction(state: PermissionState): boolean {
+  return state === "denied" || state === "not_determined";
+}
 
 export function PermissionsPage() {
   const [permissions, setPermissions] = useState<PermissionStatus>({
-    microphone: false,
-    accessibility: false,
+    microphone: "not_determined",
+    accessibility: "not_determined",
   });
   const [checking, setChecking] = useState(false);
   const addToast = useToastStore((s) => s.addToast);
@@ -28,6 +45,23 @@ export function PermissionsPage() {
     }
   };
 
+  const openSystemSettings = async (target: string) => {
+    try {
+      await invokeCommand("open_system_settings", { target });
+    } catch {
+      addToast("error", "Failed to open System Settings");
+    }
+  };
+
+  // Auto-check on mount
+  useEffect(() => {
+    checkPermissions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const mic = permissionDisplay(permissions.microphone);
+  const acc = permissionDisplay(permissions.accessibility);
+
   return (
     <div className="h-full space-y-4 overflow-y-auto p-4">
       <h2 className="text-lg font-semibold">Permissions</h2>
@@ -43,15 +77,20 @@ export function PermissionsPage() {
         />
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span
-              className={`h-3 w-3 rounded-full ${permissions.microphone ? "bg-green-500" : "bg-red-500"}`}
-            />
-            <span className="text-sm text-gray-300">
-              {permissions.microphone ? "Granted" : "Not granted"}
-            </span>
+            <span className={`h-3 w-3 rounded-full ${mic.color}`} />
+            <span className="text-sm text-gray-300">{mic.label}</span>
           </div>
+          {needsAction(permissions.microphone) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => openSystemSettings("microphone")}
+            >
+              Open System Settings
+            </Button>
+          )}
         </div>
-        {!permissions.microphone && (
+        {needsAction(permissions.microphone) && (
           <div className="mt-3 rounded-lg bg-gray-800/50 p-3 text-xs text-gray-400">
             <p className="font-medium text-gray-300">How to enable:</p>
             <ol className="mt-1 list-inside list-decimal space-y-0.5">
@@ -77,15 +116,20 @@ export function PermissionsPage() {
         />
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span
-              className={`h-3 w-3 rounded-full ${permissions.accessibility ? "bg-green-500" : "bg-red-500"}`}
-            />
-            <span className="text-sm text-gray-300">
-              {permissions.accessibility ? "Granted" : "Not granted"}
-            </span>
+            <span className={`h-3 w-3 rounded-full ${acc.color}`} />
+            <span className="text-sm text-gray-300">{acc.label}</span>
           </div>
+          {needsAction(permissions.accessibility) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => openSystemSettings("accessibility")}
+            >
+              Open System Settings
+            </Button>
+          )}
         </div>
-        {!permissions.accessibility && (
+        {needsAction(permissions.accessibility) && (
           <div className="mt-3 rounded-lg bg-gray-800/50 p-3 text-xs text-gray-400">
             <p className="font-medium text-gray-300">How to enable:</p>
             <ol className="mt-1 list-inside list-decimal space-y-0.5">
