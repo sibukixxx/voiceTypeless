@@ -9,6 +9,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PermissionsPage } from "./pages/PermissionsPage";
 import { MetricsPage } from "./pages/MetricsPage";
 import { PasteAllowlistPage } from "./pages/PasteAllowlistPage";
+import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import "./App.css";
 
 function PageRouter() {
@@ -29,6 +30,8 @@ function PageRouter() {
       return <MetricsPage />;
     case "paste_allowlist":
       return <PasteAllowlistPage />;
+    case "diagnostics":
+      return <DiagnosticsPage />;
   }
 }
 
