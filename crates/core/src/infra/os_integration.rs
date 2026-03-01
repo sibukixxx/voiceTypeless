@@ -1,6 +1,75 @@
 use serde::Serialize;
 use crate::domain::error::AppError;
 
+#[cfg(target_os = "macos")]
+use std::ffi::CStr;
+#[cfg(target_os = "macos")]
+use std::ffi::c_void;
+#[cfg(target_os = "macos")]
+use std::os::raw::c_char;
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    fn AXIsProcessTrusted() -> u8;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "AVFoundation", kind = "framework")]
+unsafe extern "C" {
+    static AVMediaTypeAudio: *mut c_void;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "objc")]
+unsafe extern "C" {
+    fn objc_getClass(name: *const c_char) -> *mut c_void;
+    fn sel_registerName(name: *const c_char) -> *mut c_void;
+    fn objc_msgSend();
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "AppKit", kind = "framework")]
+unsafe extern "C" {}
+
+#[cfg(target_os = "macos")]
+type ObjcId = *mut c_void;
+
+#[cfg(target_os = "macos")]
+unsafe fn objc_class(name: &'static [u8]) -> ObjcId {
+    unsafe { objc_getClass(name.as_ptr().cast()) }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn objc_sel(name: &'static [u8]) -> *mut c_void {
+    unsafe { sel_registerName(name.as_ptr().cast()) }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn msg_send_id(receiver: ObjcId, sel_name: &'static [u8]) -> ObjcId {
+    let f: unsafe extern "C" fn(ObjcId, *mut c_void) -> ObjcId =
+        unsafe { std::mem::transmute(objc_msgSend as *const ()) };
+    unsafe { f(receiver, objc_sel(sel_name)) }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn msg_send_i64_with_id_arg(
+    receiver: ObjcId,
+    sel_name: &'static [u8],
+    arg: ObjcId,
+) -> i64 {
+    let f: unsafe extern "C" fn(ObjcId, *mut c_void, ObjcId) -> i64 =
+        unsafe { std::mem::transmute(objc_msgSend as *const ()) };
+    unsafe { f(receiver, objc_sel(sel_name), arg) }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn msg_send_cstr(receiver: ObjcId, sel_name: &'static [u8]) -> *const c_char {
+    let f: unsafe extern "C" fn(ObjcId, *mut c_void) -> *const c_char =
+        unsafe { std::mem::transmute(objc_msgSend as *const ()) };
+    unsafe { f(receiver, objc_sel(sel_name)) }
+}
+
 /// OS権限の状態
 #[derive(Debug, Clone, Serialize)]
 pub struct PermissionStatus {
@@ -24,13 +93,25 @@ impl OsIntegration {
     /// マイク権限をチェック（macOS）
     #[cfg(target_os = "macos")]
     pub fn check_microphone_permission() -> PermissionState {
-        // macOS ではAVCaptureDevice.authorizationStatusをチェックする必要があるが、
-        // Rustから直接呼ぶにはobjcブリッジが必要。
-        // Phase3では権限チェック自体のインターフェースを提供し、
-        // 実際のネイティブ呼び出しはTauri pluginまたはSwiftブリッジで行う。
-        // ここではスタブとして NotDetermined を返す。
-        log::info!("マイク権限チェック（macOS stub）");
-        PermissionState::NotDetermined
+        unsafe {
+            let capture_device = objc_class(b"AVCaptureDevice\0");
+            if capture_device.is_null() || AVMediaTypeAudio.is_null() {
+                return PermissionState::Unavailable;
+            }
+
+            let status = msg_send_i64_with_id_arg(
+                capture_device,
+                b"authorizationStatusForMediaType:\0",
+                AVMediaTypeAudio,
+            );
+            match status {
+                0 => PermissionState::NotDetermined,
+                1 => PermissionState::Denied,
+                2 => PermissionState::Denied,
+                3 => PermissionState::Granted,
+                _ => PermissionState::Unavailable,
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -41,10 +122,14 @@ impl OsIntegration {
     /// アクセシビリティ権限をチェック（macOS — 貼り付けに必要）
     #[cfg(target_os = "macos")]
     pub fn check_accessibility_permission() -> PermissionState {
-        // AXIsProcessTrusted() を呼ぶ
-        // Rustから直接呼べるが、安全のためスタブ
-        log::info!("アクセシビリティ権限チェック（macOS stub）");
-        PermissionState::NotDetermined
+        unsafe {
+            if AXIsProcessTrusted() != 0 {
+                PermissionState::Granted
+            } else {
+                // API上、未決定と拒否を区別できないため Denied として扱う
+                PermissionState::Denied
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -63,10 +148,34 @@ impl OsIntegration {
     /// アクティブアプリのBundle IDを取得（macOS）
     #[cfg(target_os = "macos")]
     pub fn get_active_app_bundle_id() -> Option<String> {
-        // NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        // objcブリッジが必要。スタブとして None を返す。
-        log::debug!("アクティブアプリ取得（macOS stub）");
-        None
+        unsafe {
+            let workspace_class = objc_class(b"NSWorkspace\0");
+            if workspace_class.is_null() {
+                return None;
+            }
+
+            let workspace = msg_send_id(workspace_class, b"sharedWorkspace\0");
+            if workspace.is_null() {
+                return None;
+            }
+
+            let frontmost = msg_send_id(workspace, b"frontmostApplication\0");
+            if frontmost.is_null() {
+                return None;
+            }
+
+            let bundle_id = msg_send_id(frontmost, b"bundleIdentifier\0");
+            if bundle_id.is_null() {
+                return None;
+            }
+
+            let utf8 = msg_send_cstr(bundle_id, b"UTF8String\0");
+            if utf8.is_null() {
+                return None;
+            }
+
+            CStr::from_ptr(utf8).to_str().ok().map(|s| s.to_string())
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -132,11 +241,21 @@ mod tests {
     #[test]
     fn test_check_all_permissions() {
         let status = OsIntegration::check_all_permissions();
-        // CI/テスト環境では Unavailable or NotDetermined
-        assert!(
-            status.microphone == PermissionState::NotDetermined
-                || status.microphone == PermissionState::Unavailable
-        );
+        // 権限状態は実行環境に依存するため、列挙値として妥当なことのみ確認
+        assert!(matches!(
+            status.microphone,
+            PermissionState::Granted
+                | PermissionState::Denied
+                | PermissionState::NotDetermined
+                | PermissionState::Unavailable
+        ));
+        assert!(matches!(
+            status.accessibility,
+            PermissionState::Granted
+                | PermissionState::Denied
+                | PermissionState::NotDetermined
+                | PermissionState::Unavailable
+        ));
     }
 
     #[test]

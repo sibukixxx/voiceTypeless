@@ -27,6 +27,25 @@ pub struct AppService {
 }
 
 impl AppService {
+    fn resolve_deliver_target(
+        &self,
+        target: Option<DeliverTarget>,
+    ) -> Result<DeliverTarget, AppError> {
+        if let Some(t) = target {
+            return Ok(t);
+        }
+
+        let mgr = self.session_mgr.lock().unwrap();
+        let session = mgr
+            .active()
+            .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?;
+
+        let resolved = match session.deliver_policy {
+            DeliverPolicy::Clipboard => DeliverTarget::Clipboard,
+        };
+        Ok(resolved)
+    }
+
     pub fn new(
         storage: Storage,
         stt_engine: Arc<dyn SttEngine>,
@@ -330,7 +349,8 @@ impl AppService {
 
     pub fn deliver(&self, text: &str) -> Result<StateTransition, AppError> {
         let start = std::time::Instant::now();
-        self.output_router.deliver_clipboard(text)?;
+        let target = self.resolve_deliver_target(None)?;
+        self.output_router.deliver(target, text)?;
 
         let now = chrono::Utc::now().to_rfc3339();
         let mut mgr = self.session_mgr.lock().unwrap();
@@ -350,8 +370,12 @@ impl AppService {
         Ok(transition)
     }
 
-    pub fn deliver_last(&self) -> Result<(StateTransition, String), AppError> {
+    pub fn deliver_last(
+        &self,
+        target: Option<DeliverTarget>,
+    ) -> Result<(StateTransition, String, DeliverTarget), AppError> {
         let start = std::time::Instant::now();
+        let target = self.resolve_deliver_target(target)?;
 
         let session_id = {
             let mgr = self.session_mgr.lock().unwrap();
@@ -376,7 +400,7 @@ impl AppService {
             .as_deref()
             .unwrap_or(&last_segment.raw_text);
 
-        self.output_router.deliver_clipboard(text)?;
+        self.output_router.deliver(target, text)?;
 
         let mgr = self.session_mgr.lock().unwrap();
         let current_state = mgr.active().map(|s| s.state.as_str().to_string());
@@ -398,7 +422,7 @@ impl AppService {
                 transition.new_state.as_str(),
                 &now,
             )?;
-            Ok((transition, text_result))
+            Ok((transition, text_result, target))
         } else {
             Ok((
                 StateTransition {
@@ -407,6 +431,7 @@ impl AppService {
                     new_state: SessionState::Idle,
                 },
                 text_result,
+                target,
             ))
         }
     }

@@ -310,7 +310,7 @@ pub fn deliver_last(app: AppHandle, service: State<'_, AppService>) -> CmdResult
         DELIVER_DONE,
         events::DeliverDonePayload {
             session_id: transition.session_id.clone(),
-            target: "clipboard".to_string(),
+            target: delivered_target.as_str().to_string(),
         },
     );
 

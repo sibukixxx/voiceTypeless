@@ -30,6 +30,27 @@ pub enum DeliverPolicy {
     Clipboard,
 }
 
+/// 配信先ターゲット
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliverTarget {
+    Clipboard,
+    Paste,
+    FileAppend,
+    Webhook,
+}
+
+impl DeliverTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Clipboard => "clipboard",
+            Self::Paste => "paste",
+            Self::FileAppend => "file_append",
+            Self::Webhook => "webhook",
+        }
+    }
+}
+
 /// セグメント情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Segment {
