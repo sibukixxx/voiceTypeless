@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
 import { RecorderPage } from "../pages/RecorderPage";
+import { useSettingsStore } from "../store/settingsStore";
+import { useSessionStore } from "../store/sessionStore";
 import {
   emitSessionStateChanged,
   emitTranscriptPartial,
@@ -75,5 +77,32 @@ describe("RecorderPage", () => {
     const clearBtn = screen.getByText("Clear");
     expect(copyBtn).not.toBeDisabled();
     expect(clearBtn).not.toBeDisabled();
+  });
+
+  it("reads auto-rewrite checkbox from settingsStore", () => {
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        rewrite_enabled: true,
+      },
+    });
+    // Set non-raw mode so checkbox is enabled
+    useSessionStore.setState({ currentMode: "memo" });
+    render(<RecorderPage />);
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeChecked();
+  });
+
+  it("updates settingsStore when auto-rewrite checkbox is toggled", async () => {
+    useSessionStore.setState({ currentMode: "memo" });
+    render(<RecorderPage />);
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+
+    fireEvent.click(checkbox);
+
+    await waitFor(() => {
+      expect(useSettingsStore.getState().settings.rewrite_enabled).toBe(true);
+    });
   });
 });

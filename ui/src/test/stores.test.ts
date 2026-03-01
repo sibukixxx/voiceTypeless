@@ -110,6 +110,11 @@ describe("sessionStore", () => {
   it("deliverLast calls invokeCommand (mock mode)", async () => {
     await useSessionStore.getState().deliverLast("clipboard");
   });
+
+  it("does not have rewriteEnabled property", () => {
+    const state = useSessionStore.getState();
+    expect("rewriteEnabled" in state).toBe(false);
+  });
 });
 
 describe("toastStore", () => {
@@ -300,6 +305,12 @@ describe("settingsStore", () => {
     expect(useSettingsStore.getState().settings.paste_allowlist).toEqual([
       "com.example.app",
     ]);
+  });
+
+  it("updateSettings updates rewrite_enabled", async () => {
+    expect(useSettingsStore.getState().settings.rewrite_enabled).toBe(false);
+    await useSettingsStore.getState().updateSettings({ rewrite_enabled: true });
+    expect(useSettingsStore.getState().settings.rewrite_enabled).toBe(true);
   });
 
   it("loadSettings completes without error (mock mode)", async () => {
