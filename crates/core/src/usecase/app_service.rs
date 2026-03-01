@@ -5,7 +5,7 @@ use crate::domain::error::AppError;
 use crate::domain::session::{SessionManager, SessionState, StateTransition};
 use crate::domain::settings::AppSettings;
 use crate::domain::types::{
-    DeliverPolicy, DictionaryEntry, HistoryPage, Mode, SessionDetail,
+    DeliverPolicy, DeliverTarget, DictionaryEntry, HistoryPage, Mode, SessionDetail,
 };
 use crate::infra::audio::pipeline::{AudioPipeline, PipelineEvent};
 use crate::infra::audio::vad::VadConfig;
@@ -29,6 +29,25 @@ pub struct AppService {
 }
 
 impl AppService {
+    fn resolve_deliver_target(
+        &self,
+        target: Option<DeliverTarget>,
+    ) -> Result<DeliverTarget, AppError> {
+        if let Some(t) = target {
+            return Ok(t);
+        }
+
+        let mgr = self.session_mgr.lock().unwrap();
+        let session = mgr
+            .active()
+            .ok_or_else(|| AppError::internal("アクティブセッションがありません"))?;
+
+        let resolved = match session.deliver_policy {
+            DeliverPolicy::Clipboard => DeliverTarget::Clipboard,
+        };
+        Ok(resolved)
+    }
+
     pub fn new(
         storage: Storage,
         stt_engine: Arc<dyn SttEngine>,
@@ -141,9 +160,7 @@ impl AppService {
     // ==================== Audio Pipeline ====================
 
     /// パイプラインを開始し、イベント受信チャネルを返す
-    pub fn start_pipeline(
-        &self,
-    ) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
+    pub fn start_pipeline(&self) -> Result<mpsc::Receiver<PipelineEvent>, AppError> {
         let storage = self.storage.lock().unwrap();
         let settings = storage.get_settings().unwrap_or_default();
 
@@ -278,12 +295,11 @@ impl AppService {
         let storage = self.storage.lock().unwrap();
         let mode_str = {
             let mgr = self.session_mgr.lock().unwrap();
-            mgr.active()
-                .and_then(|s| {
-                    serde_json::to_value(s.mode)
-                        .ok()
-                        .and_then(|v| v.as_str().map(|s| s.to_string()))
-                })
+            mgr.active().and_then(|s| {
+                serde_json::to_value(s.mode)
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
         };
         let dict_entries = storage
             .get_enabled_dictionary_entries("global", mode_str.as_deref())
@@ -335,7 +351,8 @@ impl AppService {
 
     pub fn deliver(&self, text: &str) -> Result<StateTransition, AppError> {
         let start = std::time::Instant::now();
-        self.output_router.deliver_clipboard(text)?;
+        let target = self.resolve_deliver_target(None)?;
+        self.output_router.deliver(target, text)?;
 
         let now = chrono::Utc::now().to_rfc3339();
         let mut mgr = self.session_mgr.lock().unwrap();
@@ -355,8 +372,12 @@ impl AppService {
         Ok(transition)
     }
 
-    pub fn deliver_last(&self) -> Result<(StateTransition, String), AppError> {
+    pub fn deliver_last(
+        &self,
+        target: Option<DeliverTarget>,
+    ) -> Result<(StateTransition, String, DeliverTarget), AppError> {
         let start = std::time::Instant::now();
+        let target = self.resolve_deliver_target(target)?;
 
         let session_id = {
             let mgr = self.session_mgr.lock().unwrap();
@@ -381,7 +402,7 @@ impl AppService {
             .as_deref()
             .unwrap_or(&last_segment.raw_text);
 
-        self.output_router.deliver_clipboard(text)?;
+        self.output_router.deliver(target, text)?;
 
         let mgr = self.session_mgr.lock().unwrap();
         let current_state = mgr.active().map(|s| s.state.as_str().to_string());
@@ -403,7 +424,7 @@ impl AppService {
                 transition.new_state.as_str(),
                 &now,
             )?;
-            Ok((transition, text_result))
+            Ok((transition, text_result, target))
         } else {
             Ok((
                 StateTransition {
@@ -412,13 +433,12 @@ impl AppService {
                     new_state: SessionState::Idle,
                 },
                 text_result,
+                target,
             ))
         }
     }
 
-    pub fn get_last_segment_for_rewrite(
-        &self,
-    ) -> Result<(String, String, Mode), AppError> {
+    pub fn get_last_segment_for_rewrite(&self) -> Result<(String, String, Mode), AppError> {
         let (session_id, mode) = {
             let mgr = self.session_mgr.lock().unwrap();
             let s = mgr
@@ -451,20 +471,12 @@ impl AppService {
         let settings = storage.get_settings()?;
         drop(storage);
 
-        PasteRouter::paste_if_allowlisted(
-            text,
-            &settings.paste_allowlist,
-            settings.paste_confirm,
-        )
+        PasteRouter::paste_if_allowlisted(text, &settings.paste_allowlist, settings.paste_confirm)
     }
 
     // ==================== Queries ====================
 
-    pub fn get_history(
-        &self,
-        limit: u32,
-        cursor: Option<&str>,
-    ) -> Result<HistoryPage, AppError> {
+    pub fn get_history(&self, limit: u32, cursor: Option<&str>) -> Result<HistoryPage, AppError> {
         let storage = self.storage.lock().unwrap();
         storage.list_history(limit, cursor)
     }
@@ -521,8 +533,7 @@ impl AppService {
             return Ok((0, 0));
         }
 
-        let cutoff = chrono::Utc::now()
-            - chrono::Duration::days(ttl_days as i64);
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(ttl_days as i64);
         let cutoff_str = cutoff.to_rfc3339();
 
         let storage = self.storage.lock().unwrap();
