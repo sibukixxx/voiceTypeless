@@ -11,10 +11,7 @@ fn compile_swift() {
 
     let swift_src = std::path::Path::new("swift-lib/Sources/VTSwift/SpeechRecognizer.swift");
     if !swift_src.exists() {
-        panic!(
-            "Swift source not found: {}",
-            swift_src.display()
-        );
+        panic!("Swift source not found: {}", swift_src.display());
     }
 
     // SDK パスを取得
@@ -63,7 +60,8 @@ fn compile_swift() {
     println!("cargo:rustc-link-lib=static=VTSwift");
 
     // Swift runtime のリンク
-    let toolchain_path = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain";
+    let toolchain_path =
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain";
     println!(
         "cargo:rustc-link-search=native={}/usr/lib/swift/macosx",
         toolchain_path

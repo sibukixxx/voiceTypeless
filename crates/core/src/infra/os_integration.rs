@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::domain::error::AppError;
+use serde::Serialize;
 
 #[cfg(target_os = "macos")]
 use std::ffi::CStr;

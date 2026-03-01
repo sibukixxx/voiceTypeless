@@ -82,9 +82,7 @@ impl WhisperModelSize {
     /// ダウンロード URL を返す
     pub fn download_url(&self) -> String {
         let file = self.filename();
-        format!(
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}"
-        )
+        format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}")
     }
 }
 

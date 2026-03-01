@@ -93,8 +93,7 @@ pub fn start_capture(
                     if flag.load(Ordering::Relaxed) {
                         return;
                     }
-                    let f32_data: Vec<f32> =
-                        data.iter().map(|&s| s as f32 / 32768.0).collect();
+                    let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
                     let mono = to_mono(&f32_data, channels);
                     let _ = tx.send(mono);
                 },

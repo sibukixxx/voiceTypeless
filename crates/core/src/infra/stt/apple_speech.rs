@@ -38,10 +38,7 @@ impl SttEngine for AppleSttEngine {
         ctx: SttContext,
     ) -> Result<TranscriptResult, SttError> {
         // 一時 WAV ファイルに書き出し
-        let tmp_path = std::env::temp_dir().join(format!(
-            "vt_stt_{}.wav",
-            uuid::Uuid::new_v4()
-        ));
+        let tmp_path = std::env::temp_dir().join(format!("vt_stt_{}.wav", uuid::Uuid::new_v4()));
         let tmp_path_str = tmp_path
             .to_str()
             .ok_or_else(|| SttError::TranscriptionFailed("Invalid temp path".to_string()))?;
@@ -50,13 +47,12 @@ impl SttEngine for AppleSttEngine {
             .map_err(|e| SttError::TranscriptionFailed(format!("WAV write error: {}", e)))?;
 
         // Swift で Speech.framework を呼び出し
-        let path_c = CString::new(tmp_path_str)
-            .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
+        let path_c =
+            CString::new(tmp_path_str).map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
         let lang_c = CString::new(ctx.language.as_str())
             .map_err(|e| SttError::TranscriptionFailed(e.to_string()))?;
 
-        let result_ptr =
-            unsafe { swift_speech_recognize_file(path_c.as_ptr(), lang_c.as_ptr()) };
+        let result_ptr = unsafe { swift_speech_recognize_file(path_c.as_ptr(), lang_c.as_ptr()) };
 
         // 一時ファイル削除
         let _ = std::fs::remove_file(&tmp_path);
@@ -76,13 +72,12 @@ impl SttEngine for AppleSttEngine {
         unsafe { swift_free_string(result_ptr) };
 
         // JSON パース: {"text": "...", "confidence": 0.9}
-        let parsed: SttResultJson =
-            serde_json::from_str(&result_str).map_err(|e| {
-                SttError::TranscriptionFailed(format!(
-                    "Failed to parse STT result: {} (raw: {})",
-                    e, result_str
-                ))
-            })?;
+        let parsed: SttResultJson = serde_json::from_str(&result_str).map_err(|e| {
+            SttError::TranscriptionFailed(format!(
+                "Failed to parse STT result: {} (raw: {})",
+                e, result_str
+            ))
+        })?;
 
         Ok(TranscriptResult {
             text: parsed.text,

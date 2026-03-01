@@ -122,12 +122,7 @@ impl Metrics {
             }
         };
 
-        let recent: Vec<LatencyRecord> = latencies
-            .iter()
-            .rev()
-            .take(20)
-            .cloned()
-            .collect();
+        let recent: Vec<LatencyRecord> = latencies.iter().rev().take(20).cloned().collect();
 
         MetricsSummary {
             sessions_started: c.sessions_started,

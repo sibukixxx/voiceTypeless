@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::domain::job::{JobInfo, JobKind, JobStatus};
@@ -160,7 +160,11 @@ mod tests {
     async fn test_enqueue_and_get() {
         let queue = JobQueue::new();
         let (job_id, _cancel_rx) = queue
-            .enqueue("s1".to_string(), Some("seg1".to_string()), JobKind::Transcribe)
+            .enqueue(
+                "s1".to_string(),
+                Some("seg1".to_string()),
+                JobKind::Transcribe,
+            )
             .await;
 
         let info = queue.get_job(&job_id).await.unwrap();
@@ -222,10 +226,7 @@ mod tests {
         assert_eq!(canceled.len(), 2);
         assert!(canceled.contains(&j1));
         assert!(canceled.contains(&j2));
-        assert_eq!(
-            queue.get_job(&j3).await.unwrap().status,
-            JobStatus::Queued
-        );
+        assert_eq!(queue.get_job(&j3).await.unwrap().status, JobStatus::Queued);
     }
 
     #[tokio::test]

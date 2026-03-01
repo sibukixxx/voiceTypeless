@@ -74,7 +74,10 @@ mod tests {
 
     #[test]
     fn test_normalize_fullwidth_to_halfwidth() {
-        assert_eq!(PostProcessor::normalize("Ｈｅｌｌｏ　Ｗｏｒｌｄ"), "Hello World");
+        assert_eq!(
+            PostProcessor::normalize("Ｈｅｌｌｏ　Ｗｏｒｌｄ"),
+            "Hello World"
+        );
         assert_eq!(PostProcessor::normalize("１２３４５"), "12345");
         assert_eq!(PostProcessor::normalize("ＡＢＣ"), "ABC");
     }
@@ -83,10 +86,7 @@ mod tests {
     fn test_normalize_whitespace() {
         assert_eq!(PostProcessor::normalize("hello   world"), "hello world");
         assert_eq!(PostProcessor::normalize("  hello  "), "hello");
-        assert_eq!(
-            PostProcessor::normalize("line1\nline2"),
-            "line1\nline2"
-        );
+        assert_eq!(PostProcessor::normalize("line1\nline2"), "line1\nline2");
     }
 
     #[test]
