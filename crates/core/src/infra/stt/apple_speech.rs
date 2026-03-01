@@ -89,6 +89,10 @@ impl SttEngine for AppleSttEngine {
     fn supports_partial(&self) -> bool {
         false
     }
+
+    fn name(&self) -> &str {
+        "apple"
+    }
 }
 
 /// Swift から返される JSON 構造

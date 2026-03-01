@@ -338,6 +338,10 @@ impl SttEngine for SonioxSttEngine {
     fn supports_partial(&self) -> bool {
         false
     }
+
+    fn name(&self) -> &str {
+        "soniox"
+    }
 }
 
 /// BCP 47 言語タグから Soniox の language_hints 用コードに変換
@@ -389,5 +393,11 @@ mod tests {
         assert_eq!(language_to_hint("zh-CN"), "zh");
         assert_eq!(language_to_hint("ko-KR"), "ko");
         assert_eq!(language_to_hint("fr-FR"), "");
+    }
+
+    #[test]
+    fn soniox_name_returns_soniox() {
+        let engine = SonioxSttEngine::new("test-key".to_string());
+        assert_eq!(engine.name(), "soniox");
     }
 }
