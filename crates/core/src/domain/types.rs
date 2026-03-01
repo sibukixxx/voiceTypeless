@@ -74,6 +74,7 @@ pub struct SessionSummary {
     pub created_at: String,
     pub updated_at: String,
     pub segment_count: u32,
+    pub preview_text: Option<String>,
 }
 
 /// セッション詳細（セグメント付き）

@@ -317,7 +317,10 @@ impl Storage {
                     .conn
                     .prepare(
                         "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
-                                (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                                (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
                          FROM sessions s
                          WHERE s.created_at < ?1
                            AND (
@@ -345,6 +348,7 @@ impl Storage {
                             created_at: row.get(3)?,
                             updated_at: row.get(4)?,
                             segment_count: row.get(5)?,
+                            preview_text: row.get(6)?,
                         })
                     })
                     .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
@@ -355,7 +359,10 @@ impl Storage {
                     .conn
                     .prepare(
                         "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
-                                (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                                (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
                          FROM sessions s
                          WHERE s.created_at < ?1
                          ORDER BY s.created_at DESC
@@ -371,6 +378,7 @@ impl Storage {
                             created_at: row.get(3)?,
                             updated_at: row.get(4)?,
                             segment_count: row.get(5)?,
+                            preview_text: row.get(6)?,
                         })
                     })
                     .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
@@ -382,7 +390,10 @@ impl Storage {
                 .conn
                 .prepare(
                     "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
-                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
                      FROM sessions s
                      WHERE
                        s.session_id LIKE ?1 OR
@@ -408,6 +419,7 @@ impl Storage {
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
                         segment_count: row.get(5)?,
+                    preview_text: row.get(6)?,
                     })
                 })
                 .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
@@ -418,7 +430,10 @@ impl Storage {
                 .conn
                 .prepare(
                     "SELECT s.session_id, s.state, s.mode, s.created_at, s.updated_at,
-                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count
+                            (SELECT COUNT(*) FROM segments seg WHERE seg.session_id = s.session_id) as seg_count,
+                            (SELECT COALESCE(seg2.rewritten_text, seg2.raw_text)
+                             FROM segments seg2 WHERE seg2.session_id = s.session_id
+                             ORDER BY seg2.created_at LIMIT 1) as preview
                      FROM sessions s
                      ORDER BY s.created_at DESC
                      LIMIT ?1",
@@ -433,6 +448,7 @@ impl Storage {
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
                         segment_count: row.get(5)?,
+                    preview_text: row.get(6)?,
                     })
                 })
                 .map_err(|e| AppError::storage(format!("クエリ実行失敗: {e}")))?
@@ -1056,6 +1072,47 @@ mod tests {
             .list_history(10, None, Some("存在しない"))
             .unwrap();
         assert_eq!(page.items.len(), 0);
+    }
+
+    #[test]
+    fn list_history_returns_preview_text_when_segment_exists() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
+        storage
+            .update_segment_text("seg1", "hello world", 0.9)
+            .unwrap();
+
+        let page = storage.list_history(10, None, None).unwrap();
+        assert_eq!(page.items[0].preview_text.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn list_history_returns_rewritten_text_as_preview_when_available() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+        storage.insert_segment("seg1", "s1", &now()).unwrap();
+        storage
+            .update_segment_text("seg1", "raw text", 0.9)
+            .unwrap();
+        storage
+            .update_segment_rewritten("seg1", "rewritten text")
+            .unwrap();
+
+        let page = storage.list_history(10, None, None).unwrap();
+        assert_eq!(
+            page.items[0].preview_text.as_deref(),
+            Some("rewritten text")
+        );
+    }
+
+    #[test]
+    fn list_history_returns_none_preview_when_no_segments() {
+        let storage = Storage::open_in_memory().unwrap();
+        storage.insert_session("s1", Mode::Raw, &now()).unwrap();
+
+        let page = storage.list_history(10, None, None).unwrap();
+        assert_eq!(page.items[0].preview_text, None);
     }
 
 }
