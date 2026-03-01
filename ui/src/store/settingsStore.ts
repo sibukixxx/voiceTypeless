@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AppSettings } from "../lib/types";
 import { invokeCommand } from "../lib/coreClient";
+import { useToastStore } from "./toastStore";
 
 const DEFAULT_SETTINGS: AppSettings = {
   stt_engine: "soniox",
@@ -22,8 +23,8 @@ interface SettingsStore {
 
   loadSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
-  addToAllowlist: (bundleId: string) => void;
-  removeFromAllowlist: (bundleId: string) => void;
+  addToAllowlist: (bundleId: string) => Promise<void>;
+  removeFromAllowlist: (bundleId: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -45,35 +46,46 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   updateSettings: async (partial) => {
-    const newSettings = { ...get().settings, ...partial };
+    const prev = get().settings;
+    const newSettings = { ...prev, ...partial };
     set({ settings: newSettings });
     try {
       await invokeCommand("update_settings", { settings: newSettings });
     } catch (e) {
-      console.error("Failed to save settings:", e);
+      set({ settings: prev });
+      useToastStore.getState().addToast("error", "設定の保存に失敗しました");
     }
   },
 
-  addToAllowlist: (bundleId) => {
+  addToAllowlist: async (bundleId) => {
     const current = get().settings.paste_allowlist;
-    if (!current.includes(bundleId)) {
-      const newSettings = {
-        ...get().settings,
-        paste_allowlist: [...current, bundleId],
-      };
-      set({ settings: newSettings });
-      invokeCommand("update_settings", { settings: newSettings }).catch(console.error);
-    }
-  },
-
-  removeFromAllowlist: (bundleId) => {
+    if (current.includes(bundleId)) return;
+    const prev = get().settings;
     const newSettings = {
-      ...get().settings,
-      paste_allowlist: get().settings.paste_allowlist.filter(
-        (id) => id !== bundleId,
-      ),
+      ...prev,
+      paste_allowlist: [...current, bundleId],
     };
     set({ settings: newSettings });
-    invokeCommand("update_settings", { settings: newSettings }).catch(console.error);
+    try {
+      await invokeCommand("update_settings", { settings: newSettings });
+    } catch (e) {
+      set({ settings: prev });
+      useToastStore.getState().addToast("error", "許可リストの更新に失敗しました");
+    }
+  },
+
+  removeFromAllowlist: async (bundleId) => {
+    const prev = get().settings;
+    const newSettings = {
+      ...prev,
+      paste_allowlist: prev.paste_allowlist.filter((id) => id !== bundleId),
+    };
+    set({ settings: newSettings });
+    try {
+      await invokeCommand("update_settings", { settings: newSettings });
+    } catch (e) {
+      set({ settings: prev });
+      useToastStore.getState().addToast("error", "許可リストの更新に失敗しました");
+    }
   },
 }));

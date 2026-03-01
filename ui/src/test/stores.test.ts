@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { useSessionStore } from "../store/sessionStore";
 import { useToastStore } from "../store/toastStore";
 import { useNavigationStore } from "../store/navigationStore";
 import { useHistoryStore } from "../store/historyStore";
 import { useDictionaryStore } from "../store/dictionaryStore";
 import { useSettingsStore } from "../store/settingsStore";
+import * as coreClient from "../lib/coreClient";
 
 describe("sessionStore", () => {
   beforeEach(() => {
@@ -305,5 +306,66 @@ describe("settingsStore", () => {
   it("loadSettings completes without error (mock mode)", async () => {
     await useSettingsStore.getState().loadSettings();
     expect(useSettingsStore.getState().loading).toBe(false);
+  });
+});
+
+describe("settingsStore rollback on save failure", () => {
+  const defaultSettings = {
+    stt_engine: "apple" as const,
+    default_mode: "raw",
+    default_deliver_target: "clipboard",
+    rewrite_enabled: false,
+    paste_allowlist: [] as string[],
+    paste_confirm: true,
+    audio_retention: "none" as const,
+    segment_ttl_days: 0,
+    hotkey_toggle: "CmdOrCtrl+Shift+R",
+    language: "ja-JP",
+    whisper_model_size: "base" as const,
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: { ...defaultSettings }, loading: false });
+    useToastStore.setState({ toasts: [] });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("updateSettings rolls back settings and shows error toast on save failure", async () => {
+    vi.spyOn(coreClient, "invokeCommand").mockRejectedValueOnce(new Error("DB error"));
+
+    await useSettingsStore.getState().updateSettings({ stt_engine: "whisper" });
+
+    expect(useSettingsStore.getState().settings.stt_engine).toBe("apple");
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].type).toBe("error");
+  });
+
+  it("addToAllowlist rolls back and shows error toast on save failure", async () => {
+    vi.spyOn(coreClient, "invokeCommand").mockRejectedValueOnce(new Error("DB error"));
+
+    await useSettingsStore.getState().addToAllowlist("com.test.app");
+
+    expect(useSettingsStore.getState().settings.paste_allowlist).toEqual([]);
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].type).toBe("error");
+  });
+
+  it("removeFromAllowlist rolls back and shows error toast on save failure", async () => {
+    useSettingsStore.setState({
+      settings: { ...defaultSettings, paste_allowlist: ["com.test.app"] },
+    });
+    vi.spyOn(coreClient, "invokeCommand").mockRejectedValueOnce(new Error("DB error"));
+
+    await useSettingsStore.getState().removeFromAllowlist("com.test.app");
+
+    expect(useSettingsStore.getState().settings.paste_allowlist).toEqual(["com.test.app"]);
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].type).toBe("error");
   });
 });
