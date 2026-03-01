@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 pub mod apple_speech;
 mod noop;
+pub mod soniox;
 #[cfg(feature = "whisper")]
 pub mod whisper;
 

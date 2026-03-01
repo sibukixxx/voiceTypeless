@@ -147,7 +147,7 @@ export interface Prompt {
 }
 
 // === Settings ===
-export type SttEngine = "apple" | "whisper" | "cloud";
+export type SttEngine = "apple" | "whisper" | "cloud" | "soniox";
 export type AudioRetention = "none" | "1day" | "7days" | "30days";
 export type DeliverPolicyType =
   | "clipboard_only"
@@ -161,6 +161,7 @@ export interface AppSettings {
   hotkey: string;
   paste_allowlist: string[];
   claude_api_key?: string;
+  soniox_api_key?: string;
   language: string;
   rewrite_enabled: boolean;
 }
