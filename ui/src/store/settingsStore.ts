@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AppSettings } from "../lib/types";
 import { invokeCommand } from "../lib/coreClient";
+import { useToastStore } from "./toastStore";
 
 const DEFAULT_SETTINGS: AppSettings = {
   stt_engine: "soniox",
@@ -19,6 +20,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 interface SettingsStore {
   settings: AppSettings;
   loading: boolean;
+  saving: boolean;
+  lastSaved: number;
 
   loadSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
@@ -29,6 +32,8 @@ interface SettingsStore {
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   loading: false,
+  saving: false,
+  lastSaved: 0,
 
   loadSettings: async () => {
     set({ loading: true });
@@ -45,35 +50,47 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   updateSettings: async (partial) => {
-    const newSettings = { ...get().settings, ...partial };
-    set({ settings: newSettings });
+    const previousSettings = get().settings;
+    const newSettings = { ...previousSettings, ...partial };
+    set({ settings: newSettings, saving: true });
     try {
       await invokeCommand("update_settings", { settings: newSettings });
+      set({ lastSaved: Date.now(), saving: false });
     } catch (e) {
       console.error("Failed to save settings:", e);
+      set({ settings: previousSettings, saving: false });
+      useToastStore.getState().addToast("error", "Failed to save settings");
     }
   },
 
   addToAllowlist: (bundleId) => {
     const current = get().settings.paste_allowlist;
     if (!current.includes(bundleId)) {
+      const previousSettings = get().settings;
       const newSettings = {
-        ...get().settings,
+        ...previousSettings,
         paste_allowlist: [...current, bundleId],
       };
       set({ settings: newSettings });
-      invokeCommand("update_settings", { settings: newSettings }).catch(console.error);
+      invokeCommand("update_settings", { settings: newSettings }).catch(() => {
+        set({ settings: previousSettings });
+        useToastStore.getState().addToast("error", "Failed to update allowlist");
+      });
     }
   },
 
   removeFromAllowlist: (bundleId) => {
+    const previousSettings = get().settings;
     const newSettings = {
-      ...get().settings,
-      paste_allowlist: get().settings.paste_allowlist.filter(
+      ...previousSettings,
+      paste_allowlist: previousSettings.paste_allowlist.filter(
         (id) => id !== bundleId,
       ),
     };
     set({ settings: newSettings });
-    invokeCommand("update_settings", { settings: newSettings }).catch(console.error);
+    invokeCommand("update_settings", { settings: newSettings }).catch(() => {
+      set({ settings: previousSettings });
+      useToastStore.getState().addToast("error", "Failed to update allowlist");
+    });
   },
 }));
