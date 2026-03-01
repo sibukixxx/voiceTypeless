@@ -24,9 +24,9 @@ const WHISPER_MODEL_OPTIONS = [
 
 const DELIVER_OPTIONS = [
   { value: "clipboard", label: "Clipboard Only" },
-  { value: "paste", label: "Paste to App" },
-  { value: "file_append", label: "File Append" },
-  { value: "webhook", label: "Webhook" },
+  { value: "paste", label: "Paste to App (Coming soon)", disabled: true },
+  { value: "file_append", label: "File Append (Coming soon)", disabled: true },
+  { value: "webhook", label: "Webhook (Coming soon)", disabled: true },
 ];
 
 const RETENTION_OPTIONS = [
@@ -45,6 +45,8 @@ const LANGUAGE_OPTIONS = [
 export function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings);
   const loading = useSettingsStore((s) => s.loading);
+  const saving = useSettingsStore((s) => s.saving);
+  const lastSaved = useSettingsStore((s) => s.lastSaved);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const navigate = useNavigationStore((s) => s.navigate);
@@ -52,6 +54,17 @@ export function SettingsPage() {
 
   const [whisperModelAvailable, setWhisperModelAvailable] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sonioxKeyInput, setSonioxKeyInput] = useState(settings.soniox_api_key ?? "");
+  const [claudeKeyInput, setClaudeKeyInput] = useState(settings.claude_api_key ?? "");
+
+  // Sync local key inputs when settings change externally
+  useEffect(() => {
+    setSonioxKeyInput(settings.soniox_api_key ?? "");
+  }, [settings.soniox_api_key]);
+
+  useEffect(() => {
+    setClaudeKeyInput(settings.claude_api_key ?? "");
+  }, [settings.claude_api_key]);
 
   // Load settings and check whisper model on mount
   useEffect(() => {
@@ -93,7 +106,15 @@ export function SettingsPage() {
 
   return (
     <div className="h-full space-y-4 overflow-y-auto p-4">
-      <h2 className="text-lg font-semibold">Settings</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Settings</h2>
+        {saving && (
+          <span className="animate-pulse text-xs text-gray-400">Saving...</span>
+        )}
+        {!saving && lastSaved > 0 && (
+          <span className="text-xs text-green-400">Saved</span>
+        )}
+      </div>
 
       {/* STT Engine */}
       <Card>
@@ -115,10 +136,11 @@ export function SettingsPage() {
             </label>
             <input
               type="password"
-              value={settings.soniox_api_key ?? ""}
-              onChange={(e) =>
+              value={sonioxKeyInput}
+              onChange={(e) => setSonioxKeyInput(e.target.value)}
+              onBlur={() =>
                 updateSettings({
-                  soniox_api_key: e.target.value || undefined,
+                  soniox_api_key: sonioxKeyInput || undefined,
                 })
               }
               placeholder="Enter Soniox API key"
@@ -196,10 +218,11 @@ export function SettingsPage() {
         />
         <input
           type="password"
-          value={settings.claude_api_key ?? ""}
-          onChange={(e) =>
+          value={claudeKeyInput}
+          onChange={(e) => setClaudeKeyInput(e.target.value)}
+          onBlur={() =>
             updateSettings({
-              claude_api_key: e.target.value || undefined,
+              claude_api_key: claudeKeyInput || undefined,
             })
           }
           placeholder="sk-ant-..."
@@ -298,6 +321,13 @@ export function SettingsPage() {
             onClick={() => navigate("metrics")}
           >
             Metrics
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => navigate("diagnostics")}
+          >
+            Diagnostics
           </Button>
         </div>
       </Card>

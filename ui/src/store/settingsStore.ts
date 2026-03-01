@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 interface SettingsStore {
   settings: AppSettings;
   loading: boolean;
+  saving: boolean;
+  lastSaved: number;
 
   loadSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
@@ -31,6 +33,8 @@ interface SettingsStore {
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   loading: false,
+  saving: false,
+  lastSaved: 0,
 
   loadSettings: async () => {
     set({ loading: true });
@@ -49,13 +53,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   updateSettings: async (partial) => {
     const prev = get().settings;
     const newSettings = { ...prev, ...partial };
-    set({ settings: newSettings });
+    set({ settings: newSettings, saving: true });
     try {
       await invokeCommand("update_settings", { settings: newSettings });
+      set({ lastSaved: Date.now(), saving: false });
       // 設定変更後にセットアップ状態を再チェック
       useSetupStore.getState().checkSetup();
     } catch (e) {
-      set({ settings: prev });
+      set({ settings: prev, saving: false });
       useToastStore.getState().addToast("error", "設定の保存に失敗しました");
     }
   },
